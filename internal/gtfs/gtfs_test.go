@@ -24,6 +24,29 @@ func loadSample(t *testing.T) *Feed {
 	return feed
 }
 
+// hm is a stop time of h hours and m minutes.
+func hm(h, m int) Time { return Time(h*3600 + m*60) }
+
+// stopTimeText is a StopTime with its Strs resolved, for comparisons.
+type stopTimeText struct {
+	StopID             string
+	Sequence           int32
+	Arrival, Departure Time
+	NoPickup           bool
+	NoDropOff          bool
+	Platform, Track    string
+	Category           string
+}
+
+func (f *Feed) text(st StopTime) stopTimeText {
+	return stopTimeText{
+		StopID: f.Str(st.StopID), Sequence: st.Sequence,
+		Arrival: st.Arrival, Departure: st.Departure,
+		NoPickup: st.NoPickup, NoDropOff: st.NoDropOff,
+		Platform: f.Str(st.Platform), Track: f.Str(st.Track), Category: f.Str(st.Category),
+	}
+}
+
 func TestLoad_Sample_Stations(t *testing.T) {
 	feed := loadSample(t)
 
@@ -58,16 +81,16 @@ func TestLoad_Sample_Trip(t *testing.T) {
 	if len(trip.StopTimes) != 17 {
 		t.Fatalf("len(StopTimes) = %d, want 17", len(trip.StopTimes))
 	}
-	first := trip.StopTimes[0]
-	want := StopTime{
+	first := feed.text(trip.StopTimes[0])
+	want := stopTimeText{
 		StopID: "60103_RAIL_2_3", Sequence: 1,
-		Arrival: 5*time.Hour + 10*time.Minute, Departure: 5*time.Hour + 10*time.Minute,
+		Arrival: hm(5, 10), Departure: hm(5, 10),
 		Platform: "2", Track: "3", Category: "IC",
 	}
 	if first != want {
 		t.Errorf("StopTimes[0] = %+v\n                 want %+v", first, want)
 	}
-	if last := trip.StopTimes[16]; last.StopID != "84400_RAIL_1_3" || last.Sequence != 17 {
+	if last := feed.text(trip.StopTimes[16]); last.StopID != "84400_RAIL_1_3" || last.Sequence != 17 {
 		t.Errorf("StopTimes[16] = %+v, want 84400_RAIL_1_3 seq 17", last)
 	}
 }
@@ -89,7 +112,7 @@ func TestLoad_Sample_TimesPastMidnight(t *testing.T) {
 
 	// URSA's Wrocław stop: "26:59:00","27:10:00" on the previous service day.
 	st := feed.Trips["PLK_IC_2026_322124420"].StopTimes[15]
-	if st.Arrival != 26*time.Hour+59*time.Minute || st.Departure != 27*time.Hour+10*time.Minute {
+	if st.Arrival != hm(26, 59) || st.Departure != hm(27, 10) {
 		t.Errorf("arrival/departure = %v/%v, want 26h59m/27h10m", st.Arrival, st.Departure)
 	}
 }
@@ -155,11 +178,15 @@ func TestLoad_Minimal(t *testing.T) {
 		t.Fatalf("StopTimes not sorted by sequence: %+v", trip.StopTimes)
 	}
 	s1, s2 := trip.StopTimes[0], trip.StopTimes[1]
-	if s1.Arrival != NoTime || s1.Departure != 24*time.Hour || !s1.NoPickup || s1.NoDropOff {
+	if s1.Arrival != NoTime || s1.Departure != hm(24, 0) || !s1.NoPickup || s1.NoDropOff {
 		t.Errorf("first stop = %+v; want no arrival, departure 24h, no pickup", s1)
 	}
-	if s2.Arrival != 25*time.Hour+30*time.Minute || !s2.NoDropOff || s2.NoPickup {
+	if s2.Arrival != hm(25, 30) || !s2.NoDropOff || s2.NoPickup {
 		t.Errorf("second stop = %+v; want arrival 25h30m, no drop-off", s2)
+	}
+	if feed.Str(s1.StopID) != "S1_P" || feed.Str(s2.StopID) != "S2" || s1.Platform != 0 || feed.Str(s1.Platform) != "" {
+		t.Errorf("stop IDs %q, %q, platform %q; want S1_P, S2 and empty platform as the zero Str",
+			feed.Str(s1.StopID), feed.Str(s2.StopID), feed.Str(s1.Platform))
 	}
 	if feed.Stops["S2"].StationID != "S2" {
 		t.Errorf("parentless stop should be its own station: %+v", feed.Stops["S2"])
@@ -228,15 +255,15 @@ func TestDate_At(t *testing.T) {
 	tests := []struct {
 		name string
 		date Date
-		off  time.Duration
+		off  Time
 		want string // RFC 3339
 	}{
-		{"ordinary day", Date{2026, 10, 22}, 5*time.Hour + 10*time.Minute, "2026-10-22T05:10:00+02:00"},
-		{"past midnight rolls over", Date{2026, 10, 21}, 27*time.Hour + 10*time.Minute, "2026-10-22T03:10:00+02:00"},
+		{"ordinary day", Date{2026, 10, 22}, hm(5, 10), "2026-10-22T05:10:00+02:00"},
+		{"past midnight rolls over", Date{2026, 10, 21}, hm(27, 10), "2026-10-22T03:10:00+02:00"},
 		// GTFS measures from "noon minus 12h", so on DST days wall-clock
 		// times after the switch come out right.
-		{"autumn DST day, afternoon", Date{2026, 10, 25}, 15 * time.Hour, "2026-10-25T15:00:00+01:00"},
-		{"spring DST day, afternoon", Date{2026, 3, 29}, 15 * time.Hour, "2026-03-29T15:00:00+02:00"},
+		{"autumn DST day, afternoon", Date{2026, 10, 25}, hm(15, 0), "2026-10-25T15:00:00+01:00"},
+		{"spring DST day, afternoon", Date{2026, 3, 29}, hm(15, 0), "2026-03-29T15:00:00+02:00"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

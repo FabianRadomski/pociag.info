@@ -105,10 +105,11 @@ func TestParse_StopEvents(t *testing.T) {
 	}}))
 	trip, _ := s.Trip("T1", gtfs.Date{Year: 2026, Month: 10, Day: 22})
 
-	if len(trip.Stops) != 3 || trip.Stops[0].Sequence != 1 || trip.Stops[2].Sequence != 3 {
-		t.Fatalf("Stops not sorted by sequence: %+v", trip.Stops)
+	stops := trip.Stops()
+	if len(stops) != 3 || stops[0].Sequence != 1 || stops[2].Sequence != 3 {
+		t.Fatalf("Stops not sorted by sequence: %+v", stops)
 	}
-	first, mid, last := trip.Stops[0], trip.Stops[1], trip.Stops[2]
+	first, mid, last := stops[0], stops[1], stops[2]
 	if !first.Arrival.Time.IsZero() || !first.Departure.Time.Equal(clock("2026-10-22 10:07:00")) || !first.Departure.Confirmed {
 		t.Errorf("first = %+v; want no arrival, confirmed departure 10:07", first)
 	}
@@ -163,7 +164,7 @@ func TestParse_CancelledReplacementAndSkipped(t *testing.T) {
 	if tr, _ := s.Trip("DETOUR", d); tr == nil || !tr.Replacement || tr.Cancelled {
 		t.Errorf("DETOUR = %+v; want Replacement only", tr)
 	}
-	if tr, _ := s.Trip("SKIPS", d); tr == nil || len(tr.Stops) != 1 || !tr.Stops[0].Skipped {
+	if tr, _ := s.Trip("SKIPS", d); tr == nil || len(tr.Stops()) != 1 || !tr.Stops()[0].Skipped {
 		t.Errorf("SKIPS = %+v; want one skipped stop", tr)
 	}
 }

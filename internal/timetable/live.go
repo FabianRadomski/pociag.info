@@ -50,7 +50,7 @@ func (c Connection) leaves() time.Time {
 }
 
 func (c Connection) live(u *realtime.Trip) *Live {
-	if u.Cancelled || skipped(u, c.origin.Sequence) || skipped(u, c.dest.Sequence) {
+	if u.Cancelled || skipped(u, int(c.origin.Sequence)) || skipped(u, int(c.dest.Sequence)) {
 		return &Live{Cancelled: true}
 	}
 	return &Live{
@@ -68,11 +68,11 @@ func skipped(u *realtime.Trip, seq int) bool {
 // for that stop if there is one, otherwise the delay of the latest earlier
 // update carried over (GTFS-Realtime propagation), marked as a prediction.
 func (c Connection) estimate(u *realtime.Trip, st gtfs.StopTime, departure bool) realtime.Event {
-	latest, ok := u.Latest(st.Sequence)
+	latest, ok := u.Latest(int(st.Sequence))
 	if !ok {
 		return realtime.Event{}
 	}
-	if latest.Sequence == st.Sequence {
+	if latest.Sequence == int(st.Sequence) {
 		if ev := pick(latest, departure); !ev.Time.IsZero() {
 			return ev
 		}
@@ -100,7 +100,7 @@ func pick(st realtime.Stop, departure bool) realtime.Event {
 
 // offset is the scheduled departure or arrival, falling back to the other
 // when one is missing (first and last stops).
-func offset(st gtfs.StopTime, departure bool) time.Duration {
+func offset(st gtfs.StopTime, departure bool) gtfs.Time {
 	if departure && st.Departure != gtfs.NoTime || st.Arrival == gtfs.NoTime {
 		return st.Departure
 	}
@@ -109,7 +109,7 @@ func offset(st gtfs.StopTime, departure bool) time.Duration {
 
 func (c Connection) stopTime(seq int) (gtfs.StopTime, bool) {
 	sts := c.trip.StopTimes
-	i, ok := slices.BinarySearchFunc(sts, seq, func(st gtfs.StopTime, seq int) int { return cmp.Compare(st.Sequence, seq) })
+	i, ok := slices.BinarySearchFunc(sts, seq, func(st gtfs.StopTime, seq int) int { return cmp.Compare(int(st.Sequence), seq) })
 	if !ok {
 		return gtfs.StopTime{}, false
 	}

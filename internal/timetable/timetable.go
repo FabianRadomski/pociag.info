@@ -48,6 +48,7 @@ type Connection struct {
 type Timetable struct {
 	feed      *gtfs.Feed
 	byStation map[string][]stopRef
+	stationOf map[gtfs.Str]string // stop ID → its station
 	names     map[string]string
 	// daysBack: trips with times past 24:00 belong to earlier service days.
 	daysBack int
@@ -62,28 +63,29 @@ func New(feed *gtfs.Feed) *Timetable {
 	t := &Timetable{
 		feed:      feed,
 		byStation: map[string][]stopRef{},
+		stationOf: map[gtfs.Str]string{},
 		names:     make(map[string]string, len(feed.Stations)),
 	}
-	var maxOffset time.Duration
+	var maxOffset gtfs.Time
 	for _, trip := range feed.Trips {
 		for i, st := range trip.StopTimes {
-			s := t.stationOf(st.StopID)
+			s, ok := t.stationOf[st.StopID]
+			if !ok {
+				s = feed.Str(st.StopID)
+				if stop, ok := feed.Stops[s]; ok {
+					s = stop.StationID
+				}
+				t.stationOf[st.StopID] = s
+			}
 			t.byStation[s] = append(t.byStation[s], stopRef{trip, i})
 			maxOffset = max(maxOffset, st.Arrival, st.Departure)
 		}
 	}
-	t.daysBack = int(maxOffset / (24 * time.Hour))
+	t.daysBack = int(maxOffset.Duration() / (24 * time.Hour))
 	for id, s := range feed.Stations {
 		t.names[id] = s.Name
 	}
 	return t
-}
-
-func (t *Timetable) stationOf(stopID string) string {
-	if s, ok := t.feed.Stops[stopID]; ok {
-		return s.StationID
-	}
-	return stopID
 }
 
 // StationName returns the station's name, or "" if unknown.
@@ -136,7 +138,7 @@ func (t *Timetable) candidates(from, to string, since time.Time) []Connection {
 // passengers may get off.
 func (t *Timetable) alightingAt(trip *gtfs.Trip, idx int, to string) (gtfs.StopTime, bool) {
 	for _, st := range trip.StopTimes[idx+1:] {
-		if t.stationOf(st.StopID) == to && !st.NoDropOff && st.Arrival != gtfs.NoTime {
+		if t.stationOf[st.StopID] == to && !st.NoDropOff && st.Arrival != gtfs.NoTime {
 			return st, true
 		}
 	}
@@ -146,14 +148,14 @@ func (t *Timetable) alightingAt(trip *gtfs.Trip, idx int, to string) (gtfs.StopT
 func (t *Timetable) connection(trip *gtfs.Trip, origin, dest gtfs.StopTime, date gtfs.Date) Connection {
 	route := t.feed.Routes[trip.RouteID]
 	return Connection{
-		Category:          cmp.Or(origin.Category, trip.Category),
+		Category:          cmp.Or(t.feed.Str(origin.Category), trip.Category),
 		Number:            trip.Number,
 		Name:              trip.Name,
 		Carrier:           route.AgencyID,
 		Bus:               route.Type == gtfs.RouteTypeBus,
 		Departure:         date.At(origin.Departure, warsaw),
 		Arrival:           date.At(dest.Arrival, warsaw),
-		DeparturePlatform: origin.Platform,
+		DeparturePlatform: t.feed.Str(origin.Platform),
 		Destination:       trip.Headsign,
 		TripID:            trip.ID,
 		ServiceDate:       date,
