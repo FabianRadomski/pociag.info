@@ -59,7 +59,7 @@ func (c Connection) live(u *realtime.Trip) *Live {
 	}
 }
 
-func skipped(u *realtime.Trip, seq int) bool {
+func skipped(u *realtime.Trip, seq uint32) bool {
 	st, ok := u.Stop(seq)
 	return ok && st.Skipped
 }
@@ -100,16 +100,16 @@ func pick(st realtime.Stop, departure bool) realtime.Event {
 
 // offset is the scheduled departure or arrival, falling back to the other
 // when one is missing (first and last stops).
-func offset(st gtfs.StopTime, departure bool) time.Duration {
+func offset(st gtfs.StopTime, departure bool) gtfs.Time {
 	if departure && st.Departure != gtfs.NoTime || st.Arrival == gtfs.NoTime {
 		return st.Departure
 	}
 	return st.Arrival
 }
 
-func (c Connection) stopTime(seq int) (gtfs.StopTime, bool) {
+func (c Connection) stopTime(seq uint32) (gtfs.StopTime, bool) {
 	sts := c.trip.StopTimes
-	i, ok := slices.BinarySearchFunc(sts, seq, func(st gtfs.StopTime, seq int) int { return cmp.Compare(st.Sequence, seq) })
+	i, ok := slices.BinarySearchFunc(sts, seq, func(st gtfs.StopTime, seq uint32) int { return cmp.Compare(st.Sequence, seq) })
 	if !ok {
 		return gtfs.StopTime{}, false
 	}

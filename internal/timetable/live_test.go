@@ -2,9 +2,11 @@ package timetable
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"strings"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	rt "github.com/MobilityData/gtfs-realtime-bindings/golang/gtfs"
@@ -197,6 +199,37 @@ func loadRealSnapshot(t *testing.T) *realtime.Snapshot {
 		t.Fatal(err)
 	}
 	return s
+}
+
+func TestLive_LargeStopSequences(t *testing.T) {
+	feed := maps.Clone(synthetic)
+	stopTimes := string(feed["stop_times.txt"].Data)
+	stopTimes = strings.ReplaceAll(stopTimes, "MAIN,0,", "MAIN,2147483647,")
+	stopTimes = strings.ReplaceAll(stopTimes, "MAIN,1,", "MAIN,2147483648,")
+	stopTimes = strings.ReplaceAll(stopTimes, "MAIN,2,", "MAIN,4294967295,")
+	feed["stop_times.txt"] = &fstest.MapFile{Data: []byte(stopTimes)}
+	tt := newTimetable(t, feed)
+
+	t.Run("exact match and delay propagation", func(t *testing.T) {
+		snap := snapshot(t, "MAIN", rt.TripDescriptor_SCHEDULED,
+			upd(2147483647, nil, ev("10:03", true)),
+			upd(2147483648, nil, ev("11:12", true)))
+		got := tt.Live("B", "C", at("2026-10-22", "10:00"), 1, snap)
+		assertLive(t, got, []string{"10-22 11:05 MAIN dep +7m! arr +7m~"})
+	})
+
+	t.Run("maximum sequence exact match", func(t *testing.T) {
+		snap := snapshot(t, "MAIN", rt.TripDescriptor_SCHEDULED,
+			upd(4294967295, ev("12:08", true), nil))
+		got := tt.Live("B", "C", at("2026-10-22", "10:00"), 1, snap)
+		assertLive(t, got, []string{"10-22 11:05 MAIN dep ? arr +8m!"})
+	})
+
+	t.Run("maximum sequence skipped", func(t *testing.T) {
+		snap := snapshot(t, "MAIN", rt.TripDescriptor_SCHEDULED, skip(4294967295))
+		got := tt.Live("B", "C", at("2026-10-22", "10:00"), 1, snap)
+		assertLive(t, got, []string{"10-22 11:05 MAIN CANCELLED"})
+	})
 }
 
 func TestLive_RealData_LateTrainStillUpcoming(t *testing.T) {
