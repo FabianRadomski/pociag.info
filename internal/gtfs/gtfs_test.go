@@ -30,7 +30,7 @@ func hm(h, m int) Time { return Time(h*3600 + m*60) }
 // stopTimeText is a StopTime with its Strs resolved, for comparisons.
 type stopTimeText struct {
 	StopID             string
-	Sequence           int32
+	Sequence           uint32
 	Arrival, Departure Time
 	NoPickup           bool
 	NoDropOff          bool
@@ -199,6 +199,23 @@ func TestLoad_Minimal(t *testing.T) {
 	}
 }
 
+func TestLoad_LargeStopSequences(t *testing.T) {
+	// GTFS-Realtime stop_sequence is a uint32, so the whole range must load.
+	feed, err := Load(minimal(map[string]string{
+		"stop_times.txt": "trip_id,arrival_time,departure_time,stop_id,stop_sequence\n" +
+			"T,10:02:00,10:02:00,S2,4294967295\n" +
+			"T,10:01:00,10:01:00,S2,2147483648\n" +
+			"T,10:00:00,10:00:00,S1_P,1\n",
+	}))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	sts := feed.Trips["T"].StopTimes
+	if len(sts) != 3 || sts[0].Sequence != 1 || sts[1].Sequence != 2147483648 || sts[2].Sequence != 4294967295 {
+		t.Fatalf("sequences = %+v; want 1, 2147483648, 4294967295 in order", sts)
+	}
+}
+
 func TestLoad_Errors(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -208,6 +225,7 @@ func TestLoad_Errors(t *testing.T) {
 		{"missing file", map[string]string{"stops.txt": ""}, []string{"stops.txt"}},
 		{"missing column", map[string]string{"trips.txt": "route_id,service_id\nR,SV\n"}, []string{"trips.txt", "trip_id"}},
 		{"bad time", map[string]string{"stop_times.txt": "trip_id,arrival_time,departure_time,stop_id,stop_sequence\nT,ab:cd:ef,10:00:00,S2,1\n"}, []string{"stop_times.txt", "line 2", "ab:cd:ef"}},
+		{"stop_sequence past uint32", map[string]string{"stop_times.txt": "trip_id,arrival_time,departure_time,stop_id,stop_sequence\nT,10:00:00,10:00:00,S2,4294967296\n"}, []string{"stop_times.txt", "4294967296"}},
 		{"bad date", map[string]string{"calendar_dates.txt": "service_id,date,exception_type\nSV,2026-10-22,1\n"}, []string{"calendar_dates.txt", "2026-10-22"}},
 		{"unknown trip in stop_times", map[string]string{"stop_times.txt": "trip_id,arrival_time,departure_time,stop_id,stop_sequence\nNOPE,10:00:00,10:00:00,S2,1\n"}, []string{"stop_times.txt", "NOPE"}},
 	}

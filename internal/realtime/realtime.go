@@ -38,8 +38,8 @@ type Trip struct {
 
 // stop is a Stop packed into 24 bytes instead of 80; a feed has ~250k.
 type stop struct {
-	arr, dep int64 // Unix seconds
-	seq      int32
+	arr, dep int64  // Unix seconds
+	seq      uint32 // as in the feed; Stop.Sequence holds it without loss
 	flags    uint8
 }
 
@@ -52,7 +52,7 @@ const (
 )
 
 func packStop(s Stop) stop {
-	p := stop{seq: int32(s.Sequence)}
+	p := stop{seq: uint32(s.Sequence)}
 	set := func(bit uint8, on bool) {
 		if on {
 			p.flags |= bit

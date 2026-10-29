@@ -80,10 +80,10 @@ type Trip struct {
 
 type StopTime struct {
 	StopID             Str
-	Sequence           int32
-	Arrival, Departure Time // NoTime if absent
-	NoPickup           bool // pickup_type=1: can't board here
-	NoDropOff          bool // drop_off_type=1: can't alight here
+	Sequence           uint32 // GTFS-Realtime stop_sequence is a uint32 too
+	Arrival, Departure Time   // NoTime if absent
+	NoPickup           bool   // pickup_type=1: can't board here
+	NoDropOff          bool   // drop_off_type=1: can't alight here
 	Platform, Track    Str
 	Category           Str // plk_category_code at this stop
 }
@@ -235,7 +235,7 @@ func (f *Feed) loadStopTimes(fsys fs.FS) error {
 		if !ok {
 			return r.errorf("unknown trip_id %q", r.get("trip_id"))
 		}
-		seq, err := strconv.ParseInt(r.get("stop_sequence"), 10, 32)
+		seq, err := strconv.ParseUint(r.get("stop_sequence"), 10, 32)
 		if err != nil {
 			return r.errorf("stop_sequence %q: %v", r.get("stop_sequence"), err)
 		}
@@ -248,7 +248,7 @@ func (f *Feed) loadStopTimes(fsys fs.FS) error {
 			return r.errorf("%v", err)
 		}
 		trip.StopTimes = append(trip.StopTimes, StopTime{
-			StopID: intern(r.get("stop_id")), Sequence: int32(seq),
+			StopID: intern(r.get("stop_id")), Sequence: uint32(seq),
 			Arrival: arr, Departure: dep,
 			NoPickup:  r.get("pickup_type") == "1",
 			NoDropOff: r.get("drop_off_type") == "1",

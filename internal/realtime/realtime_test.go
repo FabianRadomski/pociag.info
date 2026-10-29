@@ -1,6 +1,7 @@
 package realtime
 
 import (
+	"math"
 	"os"
 	"testing"
 	"time"
@@ -145,6 +146,30 @@ func TestTrip_StopAndLatest(t *testing.T) {
 		if ok != tc.wantOK || (ok && st.Sequence != tc.wantSeq) {
 			t.Errorf("Latest(%d) = seq %d, %v; want seq %d, %v", tc.seq, st.Sequence, ok, tc.wantSeq, tc.wantOK)
 		}
+	}
+}
+
+func TestTrip_LargeStopSequences(t *testing.T) {
+	// stop_sequence is a uint32; values past MaxInt32 must keep their order
+	// and still be found.
+	s := mustParse(t, encode(t, &rt.FeedMessage{Entity: []*rt.FeedEntity{
+		tripEntity("U1", "T1", "20261022", rt.TripDescriptor_SCHEDULED,
+			stopUpdate(math.MaxUint32, nil, event("2026-10-22 10:09:00", confirmed)),
+			stopUpdate(1<<31, nil, event("2026-10-22 10:08:00", confirmed)),
+			stopUpdate(1, nil, event("2026-10-22 10:07:00", confirmed)),
+		),
+	}}))
+	trip, _ := s.Trip("T1", gtfs.Date{Year: 2026, Month: 10, Day: 22})
+
+	stops := trip.Stops()
+	if len(stops) != 3 || stops[0].Sequence != 1 || stops[1].Sequence != 1<<31 || stops[2].Sequence != math.MaxUint32 {
+		t.Fatalf("Stops = %+v; want sequences 1, 2147483648, 4294967295", stops)
+	}
+	if st, ok := trip.Stop(1 << 31); !ok || st.Sequence != 1<<31 {
+		t.Errorf("Stop(2147483648) = %+v, %v", st, ok)
+	}
+	if st, ok := trip.Latest(1<<31 + 5); !ok || st.Sequence != 1<<31 {
+		t.Errorf("Latest(2147483653) = seq %d, %v; want 2147483648", st.Sequence, ok)
 	}
 }
 
