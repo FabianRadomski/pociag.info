@@ -138,8 +138,8 @@ func TestTrip_StopAndLatest(t *testing.T) {
 		t.Errorf("Stop(5) = %+v, %v", st, ok)
 	}
 	for _, tc := range []struct {
-		seq     int
-		wantSeq int
+		seq     uint32
+		wantSeq uint32
 		wantOK  bool
 	}{{1, 0, false}, {2, 2, true}, {4, 2, true}, {5, 5, true}, {9, 5, true}} {
 		st, ok := trip.Latest(tc.seq)

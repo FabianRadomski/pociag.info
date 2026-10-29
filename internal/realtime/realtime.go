@@ -52,7 +52,7 @@ const (
 )
 
 func packStop(s Stop) stop {
-	p := stop{seq: uint32(s.Sequence)}
+	p := stop{seq: s.Sequence}
 	set := func(bit uint8, on bool) {
 		if on {
 			p.flags |= bit
@@ -75,7 +75,7 @@ func (p stop) unpack() Stop {
 		return Event{Time: time.Unix(unix, 0), Confirmed: p.flags&confirmed != 0}
 	}
 	return Stop{
-		Sequence:  int(p.seq),
+		Sequence:  p.seq,
 		Arrival:   event(p.arr, hasArr, arrConfirmed),
 		Departure: event(p.dep, hasDep, depConfirmed),
 		Skipped:   p.flags&skipped != 0,
@@ -84,7 +84,7 @@ func (p stop) unpack() Stop {
 
 // Stop is an update for one stop, identified by its GTFS stop_sequence.
 type Stop struct {
-	Sequence           int
+	Sequence           uint32
 	Arrival, Departure Event
 	Skipped            bool
 }
@@ -167,7 +167,7 @@ func convertTrip(tu *rt.TripUpdate) *Trip {
 	}
 	for _, u := range tu.StopTimeUpdate {
 		t.stops = append(t.stops, packStop(Stop{
-			Sequence:  int(u.GetStopSequence()),
+			Sequence:  u.GetStopSequence(),
 			Arrival:   convertEvent(u.Arrival),
 			Departure: convertEvent(u.Departure),
 			Skipped:   u.GetScheduleRelationship() == rt.TripUpdate_StopTimeUpdate_SKIPPED,
@@ -225,7 +225,7 @@ func (t *Trip) Stops() []Stop {
 }
 
 // Stop returns the update for exactly this stop_sequence.
-func (t *Trip) Stop(seq int) (Stop, bool) {
+func (t *Trip) Stop(seq uint32) (Stop, bool) {
 	i, ok := t.search(seq)
 	if !ok {
 		return Stop{}, false
@@ -235,7 +235,7 @@ func (t *Trip) Stop(seq int) (Stop, bool) {
 
 // Latest returns the last update at or before stop_sequence seq; per the
 // GTFS-Realtime spec its delay carries over to later stops without updates.
-func (t *Trip) Latest(seq int) (Stop, bool) {
+func (t *Trip) Latest(seq uint32) (Stop, bool) {
 	i, found := t.search(seq)
 	if found {
 		return t.stops[i].unpack(), true
@@ -246,6 +246,6 @@ func (t *Trip) Latest(seq int) (Stop, bool) {
 	return t.stops[i-1].unpack(), true
 }
 
-func (t *Trip) search(seq int) (int, bool) {
-	return slices.BinarySearchFunc(t.stops, seq, func(p stop, seq int) int { return cmp.Compare(int(p.seq), seq) })
+func (t *Trip) search(seq uint32) (int, bool) {
+	return slices.BinarySearchFunc(t.stops, seq, func(p stop, seq uint32) int { return cmp.Compare(p.seq, seq) })
 }
