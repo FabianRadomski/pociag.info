@@ -4,6 +4,7 @@ package feeds
 
 import (
 	"archive/zip"
+	"errors"
 	"fmt"
 	"os"
 	"runtime/debug"
@@ -50,9 +51,11 @@ func (s *Store) LoadStaticFile(path string) error {
 	st, err := loadZip(path)
 	if err != nil {
 		if s.StaticCache != "" && path != s.StaticCache {
-			if prev, cacheErr := loadZip(s.StaticCache); cacheErr == nil {
-				s.static.Store(prev)
+			prev, cacheErr := loadZip(s.StaticCache)
+			if cacheErr != nil {
+				return errors.Join(err, fmt.Errorf("fall back to cached static: %w", cacheErr))
 			}
+			s.static.Store(prev)
 		}
 		return err
 	}
@@ -66,7 +69,8 @@ func (s *Store) LoadStaticFile(path string) error {
 }
 
 // LoadCachedStatic loads StaticCache, returning its modification time to seed
-// If-Modified-Since. A missing cache yields an fs.ErrNotExist error.
+// If-Modified-Since; fetch.Fetcher sets it to the server's Last-Modified. A
+// missing cache yields an fs.ErrNotExist error.
 func (s *Store) LoadCachedStatic() (time.Time, error) {
 	info, err := os.Stat(s.StaticCache)
 	if err != nil {

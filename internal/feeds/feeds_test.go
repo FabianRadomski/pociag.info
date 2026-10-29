@@ -151,6 +151,19 @@ func TestStore_BrokenZipWithoutCacheLeavesNothing(t *testing.T) {
 	}
 }
 
+func TestStore_BrokenZipReportsFailedFallback(t *testing.T) {
+	dir := t.TempDir()
+	s := Store{StaticCache: filepath.Join(dir, "static.zip")}
+
+	err := s.LoadStaticFile(garbageFile(t, dir))
+	if !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("err = %v, want it to include the missing cache", err)
+	}
+	if s.Static() != nil {
+		t.Error("Static() should be nil when nothing loaded")
+	}
+}
+
 func TestStore_LoadCachedStatic(t *testing.T) {
 	dir := t.TempDir()
 	cache := filepath.Join(dir, "static.zip")

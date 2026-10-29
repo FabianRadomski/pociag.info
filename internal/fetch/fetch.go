@@ -20,7 +20,8 @@ type Fetcher struct {
 	Client    *http.Client // nil means http.DefaultClient
 	UserAgent string
 	// File, if set, receives the body instead of memory; it is replaced
-	// only after a complete download.
+	// only after a complete download, and its modification time is set to
+	// the response's Last-Modified so it can seed SetLastModified later.
 	File string
 
 	etag         string
@@ -76,7 +77,8 @@ func (f *Fetcher) Fetch(ctx context.Context) (Result, error) {
 
 	res := Result{Changed: true}
 	if f.File != "" {
-		if err := writeFile(f.File, resp.Body); err != nil {
+		modTime, _ := http.ParseTime(resp.Header.Get("Last-Modified"))
+		if err := writeFile(f.File, resp.Body, modTime); err != nil {
 			return Result{}, fmt.Errorf("fetch %s: %w", f.URL, err)
 		}
 		res.File = f.File
@@ -93,8 +95,9 @@ func (f *Fetcher) Fetch(ctx context.Context) (Result, error) {
 }
 
 // writeFile streams r into a temporary file next to path and renames it into
-// place, so path never holds a partial download.
-func writeFile(path string, r io.Reader) (err error) {
+// place, so path never holds a partial download. A non-zero modTime becomes
+// the file's modification time.
+func writeFile(path string, r io.Reader, modTime time.Time) (err error) {
 	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".part-*")
 	if err != nil {
 		return err
@@ -111,12 +114,12 @@ func writeFile(path string, r io.Reader) (err error) {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
+	if !modTime.IsZero() {
+		if err := os.Chtimes(tmp.Name(), modTime, modTime); err != nil {
+			return err
+		}
+	}
 	return os.Rename(tmp.Name(), path)
-}
-
-// Reset forgets validators, so the next Fetch downloads unconditionally.
-func (f *Fetcher) Reset() {
-	f.etag, f.lastModified = "", ""
 }
 
 // Poller fetches on an interval and passes changed bodies to OnChange.
@@ -127,16 +130,15 @@ type Poller struct {
 	Logger   *slog.Logger // nil means slog.Default()
 }
 
-// Step performs a single poll. If OnChange rejects a body, the fetcher's
-// validators are dropped so the next Step downloads it again rather than
-// getting stuck on 304s for content we never managed to use.
+// Step performs a single poll. If OnChange rejects a body, the fetcher keeps
+// its validators: re-downloading the same bytes would fail the same way, so
+// the next delivery is whatever the server publishes next.
 func (p *Poller) Step(ctx context.Context) error {
 	res, err := p.Fetcher.Fetch(ctx)
 	if err != nil || !res.Changed {
 		return err
 	}
 	if err := p.OnChange(res); err != nil {
-		p.Fetcher.Reset()
 		return fmt.Errorf("handle %s: %w", p.Fetcher.URL, err)
 	}
 	return nil

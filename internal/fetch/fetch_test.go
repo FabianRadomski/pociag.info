@@ -170,22 +170,6 @@ func TestFetch_ServerErrorKeepsValidators(t *testing.T) {
 	}
 }
 
-func TestFetch_ResetForcesFullDownload(t *testing.T) {
-	o := &fakeOrigin{body: "v1", etag: `"a"`}
-	f := newOrigin(t, o)
-	mustFetch(t, f)
-
-	f.Reset()
-	res := mustFetch(t, f)
-
-	if !res.Changed || string(res.Body) != "v1" {
-		t.Errorf("got Changed=%v Body=%q, want true \"v1\"", res.Changed, res.Body)
-	}
-	if got := o.lastRequest(t).Get("If-None-Match"); got != "" {
-		t.Errorf("If-None-Match after Reset = %q, want empty", got)
-	}
-}
-
 func TestFetch_HonoursContext(t *testing.T) {
 	f := newOrigin(t, &fakeOrigin{body: "v1"})
 	ctx, cancel := context.WithCancel(context.Background())
@@ -219,14 +203,14 @@ func TestPoller_StepDeliversOnlyChanges(t *testing.T) {
 	}
 }
 
-func TestPoller_HandlerErrorRetriesFullDownload(t *testing.T) {
+func TestPoller_HandlerErrorStaysConditional(t *testing.T) {
 	o := &fakeOrigin{body: "garbage", etag: `"a"`}
-	calls := 0
+	var got []string
 	p := &Poller{
 		Fetcher: newOrigin(t, o),
-		OnChange: func(Result) error {
-			calls++
-			if calls == 1 {
+		OnChange: func(r Result) error {
+			got = append(got, string(r.Body))
+			if string(r.Body) == "garbage" {
 				return errors.New("parse failed")
 			}
 			return nil
@@ -239,12 +223,16 @@ func TestPoller_HandlerErrorRetriesFullDownload(t *testing.T) {
 	if err := p.Step(context.Background()); err != nil {
 		t.Fatalf("second Step: %v", err)
 	}
-
-	if calls != 2 {
-		t.Errorf("OnChange called %d times, want 2 (same body must be re-delivered)", calls)
+	if got := o.lastRequest(t).Get("If-None-Match"); got != `"a"` {
+		t.Errorf("poll after handler error: If-None-Match = %q, want %q", got, `"a"`)
 	}
-	if got := o.lastRequest(t).Get("If-None-Match"); got != "" {
-		t.Errorf("retry after handler error was conditional (If-None-Match %q)", got)
+
+	o.set(func(o *fakeOrigin) { o.body, o.etag = "v2", `"b"` })
+	if err := p.Step(context.Background()); err != nil {
+		t.Fatalf("Step after upstream fix: %v", err)
+	}
+	if len(got) != 2 || got[0] != "garbage" || got[1] != "v2" {
+		t.Errorf("OnChange calls = %q, want [garbage v2] (rejected body not re-downloaded)", got)
 	}
 }
 
@@ -306,6 +294,30 @@ func TestFetch_ToFile(t *testing.T) {
 	}
 	if res := mustFetch(t, f); res.Changed || res.File != "" {
 		t.Errorf("unchanged fetch = %+v; want no File", res)
+	}
+}
+
+func TestFetch_ToFileTakesServerModTime(t *testing.T) {
+	lm := "Thu, 22 Oct 2026 10:00:00 GMT"
+	o := &fakeOrigin{body: "v1", lastModified: lm}
+	f := newOrigin(t, o)
+	f.File = filepath.Join(t.TempDir(), "feed.zip")
+
+	mustFetch(t, f)
+
+	info, err := os.Stat(f.File)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := time.Date(2026, 10, 22, 10, 0, 0, 0, time.UTC); !info.ModTime().Equal(want) {
+		t.Errorf("file mtime = %v, want Last-Modified %v", info.ModTime().UTC(), want)
+	}
+
+	// A restarted process seeding from the file asks the right question.
+	f2 := newOrigin(t, o)
+	f2.SetLastModified(info.ModTime())
+	if res := mustFetch(t, f2); res.Changed {
+		t.Error("seeded from file mtime: got Changed=true, want 304")
 	}
 }
 
