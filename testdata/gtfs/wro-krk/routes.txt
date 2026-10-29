@@ -1,0 +1,3 @@
+route_id,agency_id,route_short_name,route_long_name,route_type,route_color,route_text_color
+IC_IC,IC,IC,InterCity,2,F25E18,000000
+IC_TLK,IC,TLK,Twoje Linie Kolejowe,2,8505A3,FFFFFF

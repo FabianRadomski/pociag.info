@@ -1,0 +1,5 @@
+.env
+/pociag
+testdata/polish_trains/
+*:Zone.Identifier
+/data/
