@@ -6,11 +6,14 @@ import (
 	"archive/zip"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"runtime/debug"
 	"sync/atomic"
+	"syscall"
 	"time"
 
+	"pociag.info/internal/fetch"
 	"pociag.info/internal/gtfs"
 	"pociag.info/internal/realtime"
 	"pociag.info/internal/stations"
@@ -40,7 +43,9 @@ type Store struct {
 //
 // To keep peak memory at one timetable, the current one is dropped before
 // parsing; pages answer "loading" for the few seconds this takes. On success
-// the file becomes StaticCache; on failure the cached zip is loaded back.
+// the file becomes StaticCache; on failure the cached zip is loaded back, and
+// the file is left in place. Failures to read it off disk wrap
+// fetch.ErrTransient, so the poller tries the same file again.
 func (s *Store) LoadStaticFile(path string) error {
 	s.static.Store(nil)
 	debug.FreeOSMemory()
@@ -50,6 +55,9 @@ func (s *Store) LoadStaticFile(path string) error {
 
 	st, err := loadZip(path)
 	if err != nil {
+		if transient(err) {
+			err = fmt.Errorf("%w (%w)", err, fetch.ErrTransient)
+		}
 		if s.StaticCache != "" && path != s.StaticCache {
 			prev, cacheErr := loadZip(s.StaticCache)
 			if cacheErr != nil {
@@ -82,6 +90,14 @@ func (s *Store) LoadCachedStatic() (time.Time, error) {
 	}
 	s.static.Store(st)
 	return info.ModTime(), nil
+}
+
+// transient reports whether err came from the OS reading the file (EIO,
+// EMFILE, ...) rather than from its contents. A missing file is not transient:
+// loading it again cannot work.
+func transient(err error) bool {
+	var errno syscall.Errno
+	return errors.As(err, &errno) && !errors.Is(err, fs.ErrNotExist)
 }
 
 func loadZip(path string) (*Static, error) {

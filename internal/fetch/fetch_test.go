@@ -3,6 +3,7 @@ package fetch
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -233,6 +234,46 @@ func TestPoller_HandlerErrorStaysConditional(t *testing.T) {
 	}
 	if len(got) != 2 || got[0] != "garbage" || got[1] != "v2" {
 		t.Errorf("OnChange calls = %q, want [garbage v2] (rejected body not re-downloaded)", got)
+	}
+}
+
+func TestPoller_TransientHandlerErrorRetriesSameBody(t *testing.T) {
+	o := &fakeOrigin{body: "v1", etag: `"a"`}
+	var got []string
+	p := &Poller{
+		Fetcher: newOrigin(t, o),
+		OnChange: func(r Result) error {
+			got = append(got, string(r.Body))
+			if len(got) < 3 {
+				return fmt.Errorf("disk hiccup (%w)", ErrTransient)
+			}
+			return nil
+		},
+	}
+
+	for i := range 2 {
+		if err := p.Step(context.Background()); !errors.Is(err, ErrTransient) {
+			t.Fatalf("Step %d: err = %v, want ErrTransient", i+1, err)
+		}
+	}
+	if err := p.Step(context.Background()); err != nil {
+		t.Fatalf("third Step: %v", err)
+	}
+	if n := o.requestCount(); n != 1 {
+		t.Errorf("requests while retrying = %d, want 1 (retries reuse the body)", n)
+	}
+	if len(got) != 3 || got[0] != "v1" || got[1] != "v1" || got[2] != "v1" {
+		t.Errorf("OnChange calls = %q, want [v1 v1 v1]", got)
+	}
+
+	if err := p.Step(context.Background()); err != nil {
+		t.Fatalf("Step after successful retry: %v", err)
+	}
+	if got := o.lastRequest(t).Get("If-None-Match"); got != `"a"` {
+		t.Errorf("poll after retry: If-None-Match = %q, want %q", got, `"a"`)
+	}
+	if len(got) != 3 {
+		t.Errorf("OnChange called on 304: %q", got)
 	}
 }
 
