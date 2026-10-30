@@ -4,6 +4,7 @@ package fetch
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -20,7 +21,8 @@ type Fetcher struct {
 	Client    *http.Client // nil means http.DefaultClient
 	UserAgent string
 	// File, if set, receives the body instead of memory; it is replaced
-	// only after a complete download.
+	// only after a complete download, and its modification time is set to
+	// the response's Last-Modified so it can seed SetLastModified later.
 	File string
 
 	etag         string
@@ -76,7 +78,8 @@ func (f *Fetcher) Fetch(ctx context.Context) (Result, error) {
 
 	res := Result{Changed: true}
 	if f.File != "" {
-		if err := writeFile(f.File, resp.Body); err != nil {
+		modTime, _ := http.ParseTime(resp.Header.Get("Last-Modified"))
+		if err := writeFile(f.File, resp.Body, modTime); err != nil {
 			return Result{}, fmt.Errorf("fetch %s: %w", f.URL, err)
 		}
 		res.File = f.File
@@ -93,8 +96,9 @@ func (f *Fetcher) Fetch(ctx context.Context) (Result, error) {
 }
 
 // writeFile streams r into a temporary file next to path and renames it into
-// place, so path never holds a partial download.
-func writeFile(path string, r io.Reader) (err error) {
+// place, so path never holds a partial download. A non-zero modTime becomes
+// the file's modification time.
+func writeFile(path string, r io.Reader, modTime time.Time) (err error) {
 	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".part-*")
 	if err != nil {
 		return err
@@ -111,13 +115,17 @@ func writeFile(path string, r io.Reader) (err error) {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
+	if !modTime.IsZero() {
+		if err := os.Chtimes(tmp.Name(), modTime, modTime); err != nil {
+			return err
+		}
+	}
 	return os.Rename(tmp.Name(), path)
 }
 
-// Reset forgets validators, so the next Fetch downloads unconditionally.
-func (f *Fetcher) Reset() {
-	f.etag, f.lastModified = "", ""
-}
+// ErrTransient, wrapped in an OnChange error, says the body is fine but could
+// not be handled this time (e.g. a disk error), so it is worth handling again.
+var ErrTransient = errors.New("transient")
 
 // Poller fetches on an interval and passes changed bodies to OnChange.
 type Poller struct {
@@ -125,18 +133,30 @@ type Poller struct {
 	Interval time.Duration
 	OnChange func(Result) error
 	Logger   *slog.Logger // nil means slog.Default()
+
+	retry *Result // body whose handling failed with ErrTransient
 }
 
-// Step performs a single poll. If OnChange rejects a body, the fetcher's
-// validators are dropped so the next Step downloads it again rather than
-// getting stuck on 304s for content we never managed to use.
+// Step performs a single poll. If OnChange rejects a body, the fetcher keeps
+// its validators: re-downloading the same bytes would fail the same way, so
+// the next delivery is whatever the server publishes next. A rejection that
+// wraps ErrTransient is different: the next Step hands the same Result to
+// OnChange again instead of fetching, since a conditional request would only
+// get a 304 for the body we never managed to use.
 func (p *Poller) Step(ctx context.Context) error {
-	res, err := p.Fetcher.Fetch(ctx)
-	if err != nil || !res.Changed {
-		return err
+	res := p.retry
+	p.retry = nil
+	if res == nil {
+		r, err := p.Fetcher.Fetch(ctx)
+		if err != nil || !r.Changed {
+			return err
+		}
+		res = &r
 	}
-	if err := p.OnChange(res); err != nil {
-		p.Fetcher.Reset()
+	if err := p.OnChange(*res); err != nil {
+		if errors.Is(err, ErrTransient) {
+			p.retry = res
+		}
 		return fmt.Errorf("handle %s: %w", p.Fetcher.URL, err)
 	}
 	return nil
