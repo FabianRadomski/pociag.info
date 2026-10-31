@@ -76,7 +76,7 @@ func assertText(t *testing.T, got, want string) {
 func TestText_Polish(t *testing.T) {
 	got := text(t, sampleBoard(PL), false)
 
-	assertText(t, got, `Wrocław Główny → Kraków Główny
+	assertText(t, got, train+"\n"+`Wrocław Główny → Kraków Główny
 czwartek, 22.10.2026, 20:27
 
 Odjazd    Przyjazd  Pociąg              Kierunek         Peron
@@ -94,7 +94,7 @@ Dane: PKP PLK S.A. · GTFS: Mikołaj Kuranowski
 func TestText_English(t *testing.T) {
 	got := text(t, sampleBoard(EN), false)
 
-	assertText(t, got, `Wrocław Główny → Kraków Główny
+	assertText(t, got, train+"\n"+`Wrocław Główny → Kraków Główny
 Thursday, 22.10.2026, 20:27
 
 Departs   Arrives    Train               Towards          Platform
@@ -114,7 +114,7 @@ func TestText_NoLiveDataAndNoConnections(t *testing.T) {
 	b.LiveAt = time.Time{}
 	b.Connections = nil
 
-	assertText(t, text(t, b, false), `Wrocław Główny → Kraków Główny
+	assertText(t, text(t, b, false), train+"\n"+`Wrocław Główny → Kraków Główny
 czwartek, 22.10.2026, 20:27
 
 Brak bezpośrednich połączeń w najbliższych dniach.
@@ -161,6 +161,8 @@ func TestHTML_SameBoardInAPage(t *testing.T) {
 		`<span class="late-small">+4</span>`,
 		`<span class="late">+9</span>`,
 		"&lt;script&gt;",
+		`<a href="https://github.com/FabianRadomski/pociag.info">`,
+		`<a href="https://github.com/MKuranowski/PolishTrainsGTFS">`,
 	} {
 		if !strings.Contains(page, want) {
 			t.Errorf("page lacks %q", want)
@@ -170,14 +172,46 @@ func TestHTML_SameBoardInAPage(t *testing.T) {
 		t.Error("destination not escaped")
 	}
 
-	pre := regexp.MustCompile(`(?s)<pre>(.*)</pre>`).FindStringSubmatch(page)
+	pre := regexp.MustCompile(`(?s)<pre class="wide">(.*?)</pre>`).FindStringSubmatch(page)
 	if pre == nil {
-		t.Fatal("no <pre> block")
+		t.Fatal("no wide <pre> block")
 	}
 	content := html.UnescapeString(regexp.MustCompile(`<[^>]+>`).ReplaceAllString(pre[1], ""))
 	if want := text(t, b, false); content != want {
 		t.Errorf("<pre> text differs from the text board\n--- pre ---\n%s\n--- text ---\n%s", content, want)
 	}
+}
+
+func TestHTML_NarrowLayout(t *testing.T) {
+	var buf bytes.Buffer
+	if err := HTML(&buf, sampleBoard(PL)); err != nil {
+		t.Fatal(err)
+	}
+	pre := regexp.MustCompile(`(?s)<pre class="narrow">(.*?)</pre>`).FindStringSubmatch(buf.String())
+	if pre == nil {
+		t.Fatal("no narrow <pre> block")
+	}
+	assertText(t, html.UnescapeString(regexp.MustCompile(`<[^>]+>`).ReplaceAllString(pre[1], "")), train+"\n"+`Wrocław Główny → Kraków Główny
+czwartek, 22.10.2026, 20:27
+
+peron 3  20:53 +4  → 23:43
+IC 73004/5 ODRA · Przemyśl Główny
+
+peron 2  21:30     → odwołany
+TLK 63100/1 PLANTY · Kraków Główny
+
+── piątek, 23.10 ──
+peron 3  03:10     → 06:33 +9
+IC 73010/1 URSA · Przemyśl Główny
+
+         05:00     → 08:00
+BUS 4000 · Kraków Główny
+
+Opóźnienia: stan na 20:26
+Dane:
+PKP PLK S.A.
+GTFS: Mikołaj Kuranowski
+`)
 }
 
 func TestNotice(t *testing.T) {
@@ -196,6 +230,33 @@ func TestNotice(t *testing.T) {
 	}
 }
 
+func TestHelp(t *testing.T) {
+	var buf bytes.Buffer
+	if err := Help(&buf, FormatANSI, EN); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), "(@)=(@)") || !strings.Contains(buf.String(), "\x1b[1mpociag.info — check train timetables") {
+		t.Errorf("help = %q", buf.String())
+	}
+
+	buf.Reset()
+	if err := Help(&buf, FormatHTML, EN); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(buf.String(), "curl") || strings.Contains(buf.String(), "?T") {
+		t.Errorf("browser help shows terminal usage: %s", buf.String())
+	}
+	for _, link := range []string{
+		`<a href="/Wroclaw/Krakow">pociag.info/Wroclaw/Krakow</a>`,
+		`<a href="/Warszawa/Gdansk?n=5">pociag.info/Warszawa/Gdansk?n=5</a>`,
+		`<a href="/Kielce/Lublin?lang=en">pociag.info/Kielce/Lublin?lang=en</a>`,
+	} {
+		if !strings.Contains(buf.String(), link) {
+			t.Errorf("browser help is missing %s", link)
+		}
+	}
+}
+
 func TestStringsExistInBothLanguages(t *testing.T) {
 	for _, lang := range []Lang{PL, EN} {
 		s := For(lang)
@@ -204,7 +265,8 @@ func TestStringsExistInBothLanguages(t *testing.T) {
 			"Platform": s.Platform, "Cancelled": s.Cancelled, "NoConnections": s.NoConnections,
 			"LiveAsOf": s.LiveAsOf, "NoLive": s.NoLive, "Credits": s.Credits,
 			"StationNotFound": s.StationNotFound, "NeedTwoStations": s.NeedTwoStations,
-			"SameStation": s.SameStation, "Loading": s.Loading, "Help": s.Help,
+			"SameStation": s.SameStation, "Loading": s.Loading, "HelpTitle": s.HelpTitle, "Help": s.Help,
+			"HelpWeb": s.HelpWeb,
 		} {
 			if v == "" {
 				t.Errorf("%v: %s is empty", lang, name)
