@@ -34,9 +34,15 @@ func (t *Timetable) Via(stops []string, now time.Time, n int, change time.Durati
 	}
 	// Via stops may forbid boarding or alighting: such legs still serve a
 	// train ridden straight through, and plan keeps changes off them.
+	//
+	// A leg on the last service day searched may arrive daysBack days later
+	// (times past 24:00), and the next train may leave the day after, so
+	// each segment looks daysBack+1 service days further than the one
+	// before it.
 	segs := make([][]Connection, len(stops)-1)
 	for i := range segs {
-		for _, c := range t.candidates(stops[i], stops[i+1], now.Add(-maxDelay), i == 0, i == len(segs)-1) {
+		extra := i * (t.daysBack + 1)
+		for _, c := range t.candidates(stops[i], stops[i+1], now.Add(-maxDelay), extra, i == 0, i == len(segs)-1) {
 			if mergeVia(&c, snap, i == 0, i == len(segs)-1) {
 				segs[i] = append(segs[i], c)
 			}

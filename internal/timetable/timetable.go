@@ -98,20 +98,21 @@ func (t *Timetable) StationNames() map[string]string { return t.names }
 // Connections returns up to n direct rides from station `from` to station
 // `to` departing at or after `after`, ordered by departure.
 func (t *Timetable) Connections(from, to string, after time.Time, n int) []Connection {
-	out := t.candidates(from, to, after, true, true)
+	out := t.candidates(from, to, after, 0, true, true)
 	return out[:min(max(n, 0), len(out))]
 }
 
 // candidates returns every ride from `from` to `to` scheduled to depart at
-// or after `since` within the search window, ordered by departure.
+// or after `since` within the search window, extended by extraDays service
+// days, ordered by departure.
 //
 // With dropOff false (a via stop, ridden through or changed at), a ride ends
 // at the train's first call at `to`, even one where nobody may get off; if
 // it is one, the same train also gives a ride to its first later call at
 // `to` that does let you off, to change there.
-func (t *Timetable) candidates(from, to string, since time.Time, pickup, dropOff bool) []Connection {
+func (t *Timetable) candidates(from, to string, since time.Time, extraDays int, pickup, dropOff bool) []Connection {
 	first := gtfs.DateOf(since.In(warsaw)).AddDays(-t.daysBack)
-	days := t.daysBack + searchDays + 1
+	days := t.daysBack + searchDays + 1 + extraDays
 
 	var out []Connection
 	for _, ref := range t.byStation[from] {

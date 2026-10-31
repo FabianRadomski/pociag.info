@@ -412,3 +412,49 @@ func TestVia_ChangeAtLaterCall(t *testing.T) {
 		})
 	}
 }
+
+// TestVia_OnwardTrainAfterWindow: the only Alfa-Beta train runs on the last
+// service day the search covers, and the only Beta-Gamma train the day
+// after it arrives.
+//
+// candidates covers daysBack+searchDays+1 service days from the day of
+// now-maxDelay minus daysBack. With now 2026-10-22 12:00 that day is 10-22:
+//   - all times before 24:00: daysBack 0, days 10-22..10-24, so AB runs on
+//     10-24 and BC on 10-25;
+//   - AB arrives at 25:00: daysBack 1, days 10-21..10-24, so AB runs on
+//     10-24, reaches Beta at 01:00 on 10-25, and BC runs on 10-26.
+func TestVia_OnwardTrainAfterWindow(t *testing.T) {
+	tests := []struct {
+		name, abArrives, abDate, bcDate, want string
+	}{
+		{"same-day arrival", "21:00:00", "20261024", "20261025", "10-24 20:00 AB Alfa-Beta 21:00 | 10-25 07:00 BC Beta-Gamma 08:00"},
+		{"arrival after midnight", "25:00:00", "20261024", "20261026", "10-24 20:00 AB Alfa-Beta 01:00 | 10-26 07:00 BC Beta-Gamma 08:00"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			feed := fstest.MapFS{
+				"agency.txt": viaFeed["agency.txt"],
+				"routes.txt": viaFeed["routes.txt"],
+				"stops.txt":  viaFeed["stops.txt"],
+				"trips.txt": {Data: []byte("trip_id,route_id,service_id,trip_headsign,plk_category_code,plk_train_number,plk_train_name\n" +
+					"AB,KD,S1,Beta,KD,AB,\nBC,KD,S2,Gamma,KD,BC,\n")},
+				"stop_times.txt": {Data: []byte("trip_id,stop_sequence,stop_id,arrival_time,departure_time\n" +
+					"AB,0,A,20:00:00,20:00:00\nAB,1,B," + tc.abArrives + "," + tc.abArrives + "\n" +
+					"BC,0,B,07:00:00,07:00:00\nBC,1,C,08:00:00,08:00:00\n")},
+				"calendar_dates.txt": {Data: []byte("service_id,date,exception_type\nS1," + tc.abDate + ",1\nS2," + tc.bcDate + ",1\n")},
+			}
+			got := newTimetable(t, feed).Via([]string{"A", "B", "C"}, at("2026-10-22", "12:00"), 10, 5*time.Minute, nil)
+			g := make([]string, len(got))
+			for i, j := range got {
+				legs := make([]string, len(j.Legs))
+				for k, c := range j.Legs {
+					legs[k] = c.Leaves().In(warsaw).Format("01-02 ") + journeySummary(Journey{[]Connection{c}})
+				}
+				g[i] = strings.Join(legs, " | ")
+			}
+			if len(g) != 1 || g[0] != tc.want {
+				t.Errorf("got %q, want [%q]", g, tc.want)
+			}
+		})
+	}
+}
