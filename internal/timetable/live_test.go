@@ -265,3 +265,18 @@ func TestLive_NonPositiveNReturnsNothing(t *testing.T) {
 		}
 	}
 }
+
+// TestLive_MisfitTripIgnored: a trip's updates for stops it doesn't have
+// are ignored, leaving the scheduled times; a cancellation still counts.
+func TestLive_MisfitTripIgnored(t *testing.T) {
+	tt := feedOf(tr("X", "A", "08:00", "C", "09:00"))
+	now := at("2026-10-22", "06:00")
+	late := snapshot(t, "X", rt.TripDescriptor_SCHEDULED, upd(5, ev("09:30", false), nil))
+	if got := tt.Live("A", "C", now, 1, late); len(got) != 1 || got[0].Live != nil {
+		t.Errorf("misfit update applied: %+v", got)
+	}
+	cancelled := snapshot(t, "X", rt.TripDescriptor_CANCELED, upd(5, ev("09:30", false), nil))
+	if got := tt.Live("A", "C", now, 1, cancelled); len(got) != 1 || got[0].Live == nil || !got[0].Live.Cancelled {
+		t.Errorf("cancellation lost: %+v", got)
+	}
+}

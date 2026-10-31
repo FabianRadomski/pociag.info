@@ -40,8 +40,15 @@ func (t *Timetable) Live(from, to string, now time.Time, n int, snap *realtime.S
 }
 
 // merge attaches realtime data from snap, if it has any for this trip.
+// Stop updates that don't fit the trip are ignored, as by Journeys; a
+// cancelled trip is cancelled either way.
 func (c *Connection) merge(snap *realtime.Snapshot) {
-	if u, ok := snap.Trip(c.TripID, c.ServiceDate); ok {
+	u, ok := snap.Trip(c.TripID, c.ServiceDate)
+	switch {
+	case !ok:
+	case u.Cancelled:
+		c.Live = &Live{Cancelled: true}
+	case fits(c.trip, u):
 		c.Live = c.live(u)
 	}
 }
