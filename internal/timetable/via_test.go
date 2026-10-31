@@ -8,6 +8,7 @@ import (
 	"time"
 
 	rt "github.com/MobilityData/gtfs-realtime-bindings/golang/gtfs"
+	"google.golang.org/protobuf/proto"
 
 	"pociag.info/internal/realtime"
 )
@@ -254,5 +255,40 @@ func TestVia_LaterTrainRunsOnThrough(t *testing.T) {
 			g[i] = journeySummary(j)
 		}
 		t.Errorf("got %q, want [%q]", g, want)
+	}
+}
+
+// TestVia_OrderedByScheduledDeparture: like the direct board, journeys are
+// listed by when they are scheduled to leave, so a delayed train near
+// midnight stays under its own day's heading instead of after the next
+// day's first train.
+func TestVia_OrderedByScheduledDeparture(t *testing.T) {
+	feed := fstest.MapFS{
+		"agency.txt": viaFeed["agency.txt"],
+		"routes.txt": viaFeed["routes.txt"],
+		"stops.txt":  viaFeed["stops.txt"],
+		"trips.txt": {Data: []byte("trip_id,route_id,service_id,trip_headsign,plk_category_code,plk_train_number,plk_train_name\n" +
+			"LATE,KD,S,Gamma,KD,LATE,\nEARLY,KD,S,Gamma,KD,EARLY,\n")},
+		"stop_times.txt": {Data: []byte("trip_id,stop_sequence,stop_id,arrival_time,departure_time\n" +
+			"LATE,0,A,23:55:00,23:55:00\nLATE,1,B,24:10:00,24:11:00\nLATE,2,C,24:30:00,24:30:00\n" +
+			"EARLY,0,A,24:05:00,24:05:00\nEARLY,1,B,24:20:00,24:21:00\nEARLY,2,C,24:40:00,24:40:00\n")},
+		"calendar_dates.txt": viaFeed["calendar_dates.txt"],
+	}
+	next := func(clock string) *rt.TripUpdate_StopTimeEvent {
+		return &rt.TripUpdate_StopTimeEvent{Time: proto.Int64(at("2026-10-23", clock).Unix())}
+	}
+	snap := snapshot(t, "LATE", rt.TripDescriptor_SCHEDULED,
+		upd(0, nil, next("00:15")), upd(1, next("00:30"), next("00:31")), upd(2, next("00:50"), nil))
+	got := newTimetable(t, feed).Via([]string{"A", "B", "C"}, at("2026-10-22", "23:00"), 10, 5*time.Minute, snap)
+	g := make([]string, len(got))
+	for i, j := range got {
+		g[i] = journeySummary(j)
+	}
+	want := []string{
+		"00:15 LATE Alfa-Gamma 00:50",
+		"00:05 EARLY Alfa-Gamma 00:40",
+	}
+	if strings.Join(g, "\n") != strings.Join(want, "\n") {
+		t.Errorf("journeys mismatch\n got:\n  %s\nwant:\n  %s", strings.Join(g, "\n  "), strings.Join(want, "\n  "))
 	}
 }

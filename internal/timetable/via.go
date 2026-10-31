@@ -19,13 +19,13 @@ func (j Journey) Leaves() time.Time { return j.Legs[0].Leaves() }
 func (j Journey) Arrives() time.Time { return j.Legs[len(j.Legs)-1].Arrives() }
 
 // Via returns up to n journeys from stops[0] to the last stop that pass
-// through the stations in between, in order, ordered by departure. Each leg
-// between consecutive stops is a direct train; at each stop the journey
-// continues on a train leaving at least `change` later, picked so that the
-// whole journey arrives earliest. A train running through a stop stays one
-// leg. Journeys
-// beaten by one that leaves later and arrives no later are dropped. Times
-// are live estimates where snap has them; snap may be nil.
+// through the stations in between, in order, ordered by scheduled
+// departure. Each leg between consecutive stops is a direct train; at each
+// stop the journey continues on a train leaving at least `change` later,
+// picked so that the whole journey arrives earliest. A train running through
+// a stop stays one leg. Journeys beaten by one that leaves later and arrives
+// no later are dropped. Times are live estimates where snap has them; snap
+// may be nil.
 func (t *Timetable) Via(stops []string, now time.Time, n int, change time.Duration, snap *realtime.Snapshot) []Journey {
 	if n <= 0 || len(stops) < 2 {
 		return nil
@@ -73,6 +73,9 @@ func (t *Timetable) Via(stops []string, now time.Time, n int, change time.Durati
 		out = append(out, all[i])
 	}
 	slices.Reverse(out)
+	// List them like the direct board, by scheduled departure, so a delayed
+	// train keeps its place under its own day's heading.
+	slices.SortStableFunc(out, func(a, b Journey) int { return a.Legs[0].Departure.Compare(b.Legs[0].Departure) })
 	return out[:min(n, len(out))]
 }
 
