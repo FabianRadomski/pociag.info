@@ -122,7 +122,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		for _, st := range resolved[1 : len(resolved)-1] {
 			board.Via = append(board.Via, st.Name)
 		}
-		board.Journeys = static.Timetable.Journeys(timetable.Query{
+		board.Journeys = static.Timetable.Board(timetable.Query{
 			Stops: ids, Now: now, N: count(r), Change: change(r), Direct: direct,
 		}, snap)
 	}

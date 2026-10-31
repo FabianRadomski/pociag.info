@@ -270,7 +270,7 @@ func TestJourneys_WithChanges(t *testing.T) {
 }
 
 // TestJourneys_DirectBoard: ?direct is the board of direct trains, with
-// cancelled ones; journeys leave those out.
+// cancelled ones.
 func TestJourneys_DirectBoard(t *testing.T) {
 	s := newServer(t, snapshotTime)
 	direct := get(t, s, "/Wroclaw/Krakow?T&lang=en&direct").body
@@ -344,4 +344,13 @@ func TestVia_Change(t *testing.T) {
 			t.Errorf("%q: change %v, want %v", tc.query, got, tc.want)
 		}
 	}
+}
+
+// TestJourneys_OvertakenDirectTrain: TLK PLANTY leaves before IC
+// WYSPIAŃSKI and arrives after it, and is still on the board.
+func TestJourneys_OvertakenDirectTrain(t *testing.T) {
+	mustContain(t, get(t, newServer(t, snapshotTime), "/Wroclaw/Krakow?T&lang=en").body,
+		"05:44     09:43    TLK 63100/1 PLANTY",
+		"06:10     09:23    IC 6302/3 WYSPIAŃSKI",
+	)
 }

@@ -141,6 +141,30 @@ func (t *Timetable) Journeys(q Query, snap *realtime.Snapshot) []Journey {
 	return out
 }
 
+// Board is the journeys a board from one station to another lists: every
+// direct train as Live finds it, cancelled ones included, and the journeys
+// that take more than one train from Journeys, ordered by scheduled
+// departure. Journeys alone would hide a direct train that a later one
+// overtakes, and cancelled ones. With via stations or q.Direct it is
+// Journeys.
+func (t *Timetable) Board(q Query, snap *realtime.Snapshot) []Journey {
+	if len(q.Stops) != 2 || q.Direct {
+		return t.Journeys(q, snap)
+	}
+	var out []Journey
+	for _, c := range t.Live(q.Stops[0], q.Stops[1], q.Now, q.N, snap) {
+		out = append(out, Journey{[]Connection{c}})
+	}
+	// A journey on one trip is a direct train, which Live has listed.
+	for _, j := range t.Journeys(q, snap) {
+		if len(j.Legs) > 1 {
+			out = append(out, j)
+		}
+	}
+	slices.SortStableFunc(out, func(a, b Journey) int { return a.Legs[0].Departure.Compare(b.Legs[0].Departure) })
+	return out[:min(q.N, len(out))]
+}
+
 // clampTime converts seconds since the index base to a scan time.
 func clampTime(s int64) int32 {
 	return int32(min(max(s, math.MinInt32+1), math.MaxInt32-1))

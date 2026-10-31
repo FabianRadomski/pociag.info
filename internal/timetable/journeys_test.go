@@ -449,3 +449,53 @@ func TestRunChainCycle(t *testing.T) {
 		t.Errorf("runChain(1, 4) = %v, want nil", got)
 	}
 }
+
+// TestBoard_OvertakenDirectTrain: a direct train that a later one
+// overtakes is still on the board, next to journeys with changes.
+func TestBoard_OvertakenDirectTrain(t *testing.T) {
+	tt := feedOf(
+		tr("REGIO", "A", "08:00", "C", "12:00"),
+		tr("IC", "A", "08:30", "C", "10:00"),
+		tr("AB", "A", "07:00", "B", "07:30"),
+		tr("BC", "B", "07:40", "C", "09:00"),
+	)
+	assertJourneys(t, tt.Board(query("A", "C"), nil),
+		"07:00 AB Alfa-Beta 07:30 | 07:40 BC Beta-Gamma 09:00",
+		"08:00 REGIO Alfa-Gamma 12:00",
+		"08:30 IC Alfa-Gamma 10:00",
+	)
+	q := query("A", "C")
+	q.N = 2
+	assertJourneys(t, tt.Board(q, nil),
+		"07:00 AB Alfa-Beta 07:30 | 07:40 BC Beta-Gamma 09:00",
+		"08:00 REGIO Alfa-Gamma 12:00",
+	)
+}
+
+// TestBoard_Cancelled: a cancelled direct train is on the board, marked
+// cancelled; a journey with a change still avoids it.
+func TestBoard_Cancelled(t *testing.T) {
+	tt := feedOf(
+		tr("X", "A", "08:00", "C", "09:00"),
+		tr("Y", "A", "10:00", "C", "11:00"),
+	)
+	got := tt.Board(query("A", "C"), snapshot(t, "X", rt.TripDescriptor_CANCELED))
+	assertJourneys(t, got,
+		"08:00 X Alfa-Gamma 09:00",
+		"10:00 Y Alfa-Gamma 11:00",
+	)
+	if len(got) == 2 && (got[0].Legs[0].Live == nil || !got[0].Legs[0].Live.Cancelled) {
+		t.Error("X not marked cancelled")
+	}
+}
+
+// TestBoard_SplitTrain: a train split into trips in the feed is on the
+// board once, as Journeys finds it.
+func TestBoard_SplitTrain(t *testing.T) {
+	trips := "RAIL,KD,S,Gamma,KD,100,\nBUS,BUS,S,Gamma,BUS,100,\n"
+	stopTimes := "RAIL,0,A,08:00:00,08:00:00\nRAIL,1,B,09:00:00,09:00:00\n" +
+		"BUS,0,B_BUS,09:02:00,09:02:00\nBUS,1,C,10:00:00,10:00:00\n"
+	tt := New(lineFeed(trips, stopTimes, "B,B_BUS,RAIL,BUS,1\n"))
+	assertJourneys(t, tt.Board(query("A", "C"), nil),
+		"08:00 100 Alfa-Beta 09:00 | 09:02 100 Beta-Gamma 10:00")
+}
