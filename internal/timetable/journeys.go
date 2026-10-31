@@ -514,13 +514,21 @@ func (t *Timetable) legs(ix *index, legs []leg) []Connection {
 }
 
 // runChain is the runs from run a to run b along the runs a train goes on
-// as.
+// as. Continuations come from the feed, so it doesn't trust them not to loop.
 func runChain(ix *index, a, b uint32) []uint32 {
+	return chainFrom(ix, a, b, map[uint32]bool{})
+}
+
+func chainFrom(ix *index, a, b uint32, seen map[uint32]bool) []uint32 {
 	if a == b {
 		return []uint32{a}
 	}
+	if seen[a] {
+		return nil
+	}
+	seen[a] = true
 	for _, nx := range ix.runs[a].next {
-		if rest := runChain(ix, nx, b); rest != nil {
+		if rest := chainFrom(ix, nx, b, seen); rest != nil {
 			return append([]uint32{a}, rest...)
 		}
 	}

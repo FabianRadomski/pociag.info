@@ -432,3 +432,20 @@ func TestJourneys_MatchReference(t *testing.T) {
 		t.Error("the generated line doesn't exercise journeys with 0, 1 and 2 changes")
 	}
 }
+
+func TestRunChainCycle(t *testing.T) {
+	// 0 goes on as 1 or 3; 1 and 2 loop back into each other; 3 goes on as 4.
+	ix := &index{runs: []run{
+		{next: []uint32{1, 3}},
+		{next: []uint32{2}},
+		{next: []uint32{1}},
+		{next: []uint32{4}},
+		{},
+	}}
+	if got, want := runChain(ix, 0, 4), []uint32{0, 3, 4}; !slices.Equal(got, want) {
+		t.Errorf("runChain(0, 4) = %v, want %v", got, want)
+	}
+	if got := runChain(ix, 1, 4); got != nil {
+		t.Errorf("runChain(1, 4) = %v, want nil", got)
+	}
+}
