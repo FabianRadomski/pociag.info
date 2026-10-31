@@ -51,7 +51,7 @@ var strs = map[Lang]Strings{
 		Help: `  curl pociag.info/Wroclaw/Krakow
   curl pociag.info/Warszawa/Gdansk?n=5
   curl pociag.info/Krakow-Plaszow/Katowice
-  curl pociag.info/Wroclaw/Poznan/Gdansk    (przez Poznań, do 3 stacji)
+  curl pociag.info/Wroclaw/Poznan/Gdansk
 
 Opcje (łącz je przez &, np. ?n=5&lang=en):
   ?n=5       liczba pociągów, 1–20 (domyślnie 8)
@@ -63,7 +63,7 @@ Opcje (łącz je przez &, np. ?n=5&lang=en):
   pociag.info/Wroclaw/Krakow
   pociag.info/Warszawa/Gdansk?n=5
   pociag.info/Kielce/Lublin?lang=en
-  pociag.info/Wroclaw/Poznan/Gdansk    (przez Poznań, do 3 stacji)
+  pociag.info/Wroclaw/Poznan/Gdansk
 
 Opcje (łącz je przez &, np. ?n=5&lang=en):
   ?n=5       liczba pociągów, 1–20 (domyślnie 8)
@@ -91,7 +91,7 @@ Opcje (łącz je przez &, np. ?n=5&lang=en):
 		Help: `  curl pociag.info/Wroclaw/Krakow
   curl pociag.info/Warszawa/Gdansk?n=5
   curl pociag.info/Krakow-Plaszow/Katowice
-  curl pociag.info/Wroclaw/Poznan/Gdansk    (via Poznań, up to 3 stations)
+  curl pociag.info/Wroclaw/Poznan/Gdansk
 
 Options (join them with &, e.g. ?n=5&lang=en):
   ?n=5       number of trains, 1–20 (default 8)
@@ -103,7 +103,7 @@ Options (join them with &, e.g. ?n=5&lang=en):
   pociag.info/Wroclaw/Krakow
   pociag.info/Warszawa/Gdansk?n=5
   pociag.info/Kielce/Lublin?lang=en
-  pociag.info/Wroclaw/Poznan/Gdansk    (via Poznań, up to 3 stations)
+  pociag.info/Wroclaw/Poznan/Gdansk
 
 Options (join them with &, e.g. ?n=5&lang=pl):
   ?n=5       number of trains, 1–20 (default 8)
