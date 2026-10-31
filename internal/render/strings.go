@@ -18,6 +18,7 @@ var warsaw = func() *time.Location {
 type Strings struct {
 	Departs, Arrives, Train, Towards, Platform string
 	Cancelled, NoConnections, NoJourneys       string
+	NoRoute                                    string
 	Via, ChangeAt                              string
 	LiveAsOf, NoLive, Credits                  string
 	StationNotFound, NeedTwoStations           string
@@ -36,6 +37,7 @@ var strs = map[Lang]Strings{
 		Cancelled:       "odwołany",
 		NoConnections:   "Brak bezpośrednich połączeń w najbliższych dniach.",
 		NoJourneys:      "Brak połączeń przez podane stacje w najbliższych dniach.",
+		NoRoute:         "Brak połączeń w najbliższych dniach.",
 		Via:             "przez",
 		ChangeAt:        "przesiadka: %s, %d min",
 		LiveAsOf:        "Opóźnienia: stan na",
@@ -56,6 +58,7 @@ var strs = map[Lang]Strings{
 Opcje (łącz je przez &, np. ?n=5&lang=en):
   ?n=5       liczba pociągów, 1–20 (domyślnie 8)
   ?change=15 minimalny czas na przesiadkę w minutach, 0–60 (domyślnie 5)
+  ?direct    tylko pociągi bez przesiadek
   ?lang=en   język: pl lub en (domyślnie pl)
   ?T         czysty tekst bez kolorów (domyślnie z kolorami)`,
 		HelpWeb: `Wpisz stacje w adresie strony:
@@ -68,6 +71,7 @@ Opcje (łącz je przez &, np. ?n=5&lang=en):
 Opcje (łącz je przez &, np. ?n=5&lang=en):
   ?n=5       liczba pociągów, 1–20 (domyślnie 8)
   ?change=15 minimalny czas na przesiadkę w minutach, 0–60 (domyślnie 5)
+  ?direct    tylko pociągi bez przesiadek
   ?lang=en   język: pl lub en (domyślnie język przeglądarki)`,
 		weekdays: [7]string{"niedziela", "poniedziałek", "wtorek", "środa", "czwartek", "piątek", "sobota"},
 	},
@@ -76,6 +80,7 @@ Opcje (łącz je przez &, np. ?n=5&lang=en):
 		Cancelled:       "cancelled",
 		NoConnections:   "No direct connections in the next few days.",
 		NoJourneys:      "No connections via these stations in the next few days.",
+		NoRoute:         "No connections in the next few days.",
 		Via:             "via",
 		ChangeAt:        "change in %s, %d min",
 		LiveAsOf:        "Live data as of",
@@ -96,6 +101,7 @@ Opcje (łącz je przez &, np. ?n=5&lang=en):
 Options (join them with &, e.g. ?n=5&lang=en):
   ?n=5       number of trains, 1–20 (default 8)
   ?change=15 minimum change time in minutes, 0–60 (default 5)
+  ?direct    only trains without changes
   ?lang=en   language: pl or en (default pl)
   ?T         plain text without colours (default: coloured)`,
 		HelpWeb: `Put the stations in the address:
@@ -108,6 +114,7 @@ Options (join them with &, e.g. ?n=5&lang=en):
 Options (join them with &, e.g. ?n=5&lang=pl):
   ?n=5       number of trains, 1–20 (default 8)
   ?change=15 minimum change time in minutes, 0–60 (default 5)
+  ?direct    only trains without changes
   ?lang=pl   language: pl or en (default: your browser's)`,
 		weekdays: [7]string{"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"},
 	},

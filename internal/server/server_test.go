@@ -13,7 +13,11 @@ import (
 	"testing"
 	"time"
 
+	rt "github.com/MobilityData/gtfs-realtime-bindings/golang/gtfs"
+	"google.golang.org/protobuf/proto"
+
 	"pociag.info/internal/feeds"
+	"pociag.info/internal/realtime"
 )
 
 const (
@@ -247,6 +251,67 @@ func TestStaleRealtimeIsIgnored(t *testing.T) {
 	mustContain(t, r.body, "Brak danych na żywo")
 	if strings.Contains(r.body, "Opóźnienia: stan na") {
 		t.Error("stale snapshot still reported")
+	}
+}
+
+// TestJourneys_WithChanges: the sample has no direct train from Oława to
+// Kędzierzyn-Koźle, but one with a change in Opole; ?direct gives the
+// direct board, which has none.
+func TestJourneys_WithChanges(t *testing.T) {
+	s := newServer(t, snapshotTime)
+
+	r := get(t, s, "/Olawa/Kedzierzyn-Kozle?T&lang=en&n=1")
+	if r.status != http.StatusOK {
+		t.Fatalf("status %d\n%s", r.status, r.body)
+	}
+	mustContain(t, r.body, "Oława → Kędzierzyn-Koźle\n", "change in Opole Główne, ")
+	mustContain(t, get(t, s, "/Olawa/Kedzierzyn-Kozle?T&lang=en&direct").body,
+		"No direct connections in the next few days.")
+}
+
+// TestJourneys_DirectBoard: ?direct is the board of direct trains, with
+// cancelled ones; journeys leave those out.
+func TestJourneys_DirectBoard(t *testing.T) {
+	s := newServer(t, snapshotTime)
+	direct := get(t, s, "/Wroclaw/Krakow?T&lang=en&direct").body
+	mustContain(t, direct, "20:53 +4  23:43", "IC 73004/5 ODRA")
+	if got := len(boardRow.FindAllString(direct, -1)); got != defaultCount {
+		t.Errorf("direct board has %d trains, want %d:\n%s", got, defaultCount, direct)
+	}
+}
+
+// stubData serves a static feed with any snapshot.
+type stubData struct {
+	static *feeds.Static
+	snap   *realtime.Snapshot
+}
+
+func (d stubData) Static() *feeds.Static        { return d.static }
+func (d stubData) Snapshot() *realtime.Snapshot { return d.snap }
+
+// TestMisalignedRealtimeIsIgnored: updates for stops a trip doesn't have
+// mean the realtime feed was made for another static feed.
+func TestMisalignedRealtimeIsIgnored(t *testing.T) {
+	b, err := proto.Marshal(&rt.FeedMessage{
+		Header: &rt.FeedHeader{GtfsRealtimeVersion: proto.String("2.0"), Timestamp: proto.Uint64(uint64(snapshotTime.Unix()))},
+		Entity: []*rt.FeedEntity{{Id: proto.String("1"), TripUpdate: &rt.TripUpdate{
+			Trip: &rt.TripDescriptor{TripId: proto.String("PLK_IC_2026_104330778"), StartDate: proto.String("20261022")},
+			StopTimeUpdate: []*rt.TripUpdate_StopTimeUpdate{{
+				StopSequence: proto.Uint32(999),
+				Arrival:      &rt.TripUpdate_StopTimeEvent{Time: proto.Int64(snapshotTime.Unix())},
+			}},
+		}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap, err := realtime.Parse(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{Data: stubData{loadedStore(t).Static(), snap}, Now: func() time.Time { return snapshotTime }}
+	for _, path := range []string{"/Wroclaw/Krakow?T", "/Wroclaw/Krakow?T&direct"} {
+		mustContain(t, get(t, s, path).body, "Brak danych na żywo")
 	}
 }
 

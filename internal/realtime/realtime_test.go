@@ -1,6 +1,7 @@
 package realtime
 
 import (
+	"fmt"
 	"math"
 	"os"
 	"testing"
@@ -92,6 +93,31 @@ func TestParse_TripLookupByIDAndServiceDate(t *testing.T) {
 	var nilSnap *Snapshot
 	if _, ok := nilSnap.Trip("T1", gtfs.Date{Year: 2026, Month: 10, Day: 22}); ok {
 		t.Error("nil snapshot returned a trip")
+	}
+}
+
+func TestSnapshot_AllAndSequences(t *testing.T) {
+	s := mustParse(t, encode(t, &rt.FeedMessage{Entity: []*rt.FeedEntity{
+		tripEntity("U1", "T1", "20261022", rt.TripDescriptor_SCHEDULED,
+			stopUpdate(4, nil, event("2026-10-22 10:07:00", confirmed)),
+			stopUpdate(2, nil, event("2026-10-22 10:00:00", confirmed))),
+		tripEntity("U2", "T1", "20261023", rt.TripDescriptor_CANCELED),
+	}}))
+
+	seqs := map[string][]uint32{}
+	for id, trip := range s.All() {
+		seqs[id] = append(seqs[id], 0)
+		for seq := range trip.Sequences() {
+			seqs[id] = append(seqs[id], seq)
+		}
+	}
+	// One trip on two dates; each one's sequences follow a 0.
+	if got := fmt.Sprint(seqs["T1"]); len(seqs) != 1 || got != "[0 2 4 0]" && got != "[0 0 2 4]" {
+		t.Errorf("All and Sequences gave %v", seqs)
+	}
+	var nilSnap *Snapshot
+	for range nilSnap.All() {
+		t.Error("nil snapshot yielded a trip")
 	}
 }
 

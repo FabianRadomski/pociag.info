@@ -27,13 +27,36 @@ Data: PKP PLK S.A. · GTFS: Mikołaj Kuranowski
 
 Open the same URLs in a browser to get an HTML page: [pociag.info](https://pociag.info/)
 
+Where no train goes all the way, or a change gets you there sooner, journeys
+with changes are listed too (`?direct` shows only direct trains):
+```
+$ curl 'pociag.info/Opole/Torun?lang=en&n=2'
+Opole Główne → Toruń Główny
+Monday, 02.11.2026, 08:00
+
+Departs  Arrives  Train                             Towards         Platform
+08:10    08:50    IC 3802/3 CHEŁMOŃSKI 132 SAXONIA  Świnoujście     1
+         change in Wrocław Główny, 7 min
+08:57    10:29    IC 4510/1 HEWELIUSZ               Gdynia Główna   1
+         change in Poznań Główny, 17 min
+10:46    12:08    IC 7514/5 GOPŁO                   Olsztyn Główny  1
+
+09:04    11:29    IC 3804/5 MALCZEWSKI              Kołobrzeg       1
+         change in Poznań Główny, 20 min
+11:49    13:55    R 75316/7                         Toruń Wschodni  2
+```
+
+Add via stations to the path to go through them: `pociag.info/Opole/Poznan/Torun`.
+
 
 There are a few options that modify the output:
-| Option     | Meaning                                                   |
-|------------|-----------------------------------------------------------|
-| `?n=5`     | number of trains, 1–20 (default 8)                         |
-| `?lang=en` | English; otherwise taken from `Accept-Language`, default Polish |
-| `?T`       | plain text without colours                                 |
+| Option       | Meaning                                                          |
+|--------------|------------------------------------------------------------------|
+| `?n=5`       | number of journeys, 1–20 (default 8)                             |
+| `?change=15` | minimum time to change trains, in minutes, 0–60 (default 5)      |
+| `?direct`    | only trains without changes                                      |
+| `?lang=en`   | English; otherwise taken from `Accept-Language`, default Polish  |
+| `?T`         | plain text without colours                                       |
 
 `curl pociag.info` prints this help.
 

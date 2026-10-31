@@ -76,7 +76,7 @@ func BenchmarkVia(b *testing.B) {
 		b.Run(fmt.Sprintf("via=%d", len(stops)-2), func(b *testing.B) {
 			b.ReportAllocs()
 			for b.Loop() {
-				if len(tt.Via(stops, now, 10, 5*time.Minute, nil)) == 0 {
+				if len(via(tt, stops, now, 10, 5*time.Minute, nil)) == 0 {
 					b.Fatal("no journeys")
 				}
 			}

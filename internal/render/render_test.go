@@ -25,6 +25,7 @@ func predicted(s string) realtime.Event { return realtime.Event{Time: at(s)} }
 func sampleBoard(lang Lang) Board {
 	return Board{
 		Lang:   lang,
+		Direct: true,
 		From:   "Wrocław Główny",
 		To:     "Kraków Główny",
 		Now:    at("2026-10-22 20:27:00"),
@@ -280,6 +281,7 @@ func TestStringsExistInBothLanguages(t *testing.T) {
 		for name, v := range map[string]string{
 			"Departs": s.Departs, "Arrives": s.Arrives, "Train": s.Train, "Towards": s.Towards,
 			"Platform": s.Platform, "Cancelled": s.Cancelled, "NoConnections": s.NoConnections,
+			"NoJourneys": s.NoJourneys, "NoRoute": s.NoRoute, "Via": s.Via, "ChangeAt": s.ChangeAt,
 			"LiveAsOf": s.LiveAsOf, "NoLive": s.NoLive, "Credits": s.Credits,
 			"StationNotFound": s.StationNotFound, "NeedTwoStations": s.NeedTwoStations,
 			"SameStation": s.SameStation, "Loading": s.Loading, "HelpTitle": s.HelpTitle, "Help": s.Help,
@@ -364,6 +366,44 @@ func TestText_ViaANSI(t *testing.T) {
 
 	if !strings.Contains(got, "          \x1b[2mchange in Poznań Główny, 13 min\x1b[0m\n") {
 		t.Errorf("change line not indented and dimmed:\n%q", got)
+	}
+}
+
+// TestText_Journeys: without via stations or Direct, journeys are shown,
+// direct ones like the direct board.
+func TestText_Journeys(t *testing.T) {
+	b := viaBoard()
+	b.Via = nil
+	b.Journeys = append([]timetable.Journey{{Legs: []timetable.Connection{{
+		Category: "IC", Number: "6100", Departure: at("2026-10-22 20:30:00"), Arrival: at("2026-10-22 23:50:00"),
+		Destination: "Gdańsk Główny", DeparturePlatform: "1", From: "Wrocław Główny", To: "Gdańsk Główny",
+	}}}}, b.Journeys...)
+	got := text(t, b, false)
+
+	assertText(t, got, train+"\n"+`Wrocław Główny → Gdańsk Główny
+Thursday, 22.10.2026, 20:27
+
+Departs   Arrives   Train            Towards           Platform
+20:30     23:50     IC 6100          Gdańsk Główny     1
+
+21:12 +4  22:58 +4  IC 1234 ODRA     Szczecin Główny   3
+          change in Poznań Główny, 13 min
+23:15     01:40     IC 5432 KASZUBY  Gdynia Główna     1
+
+── Friday, 23.10 ──
+05:00     07:00     TLK 61100        Poznań Główny     2
+          change in Poznań Główny, 10 min
+07:10     09:00     KW 77000         Bydgoszcz Główna
+          change in Bydgoszcz Główna, 20 min
+09:20     11:00     IC 38100         Gdańsk Główny     4
+
+No live data
+Data: PKP PLK S.A. · GTFS: Mikołaj Kuranowski
+`)
+
+	b.Journeys = nil
+	if got := text(t, b, false); !strings.Contains(got, "\nNo connections in the next few days.\n") {
+		t.Errorf("missing no-journeys message:\n%s", got)
 	}
 }
 

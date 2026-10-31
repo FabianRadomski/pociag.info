@@ -82,10 +82,16 @@ func skipped(u *realtime.Trip, seq uint32) bool {
 	return ok && st.Skipped
 }
 
-// estimate returns the realtime departure or arrival at stop st: the update
-// for that stop if there is one, otherwise the delay of the latest earlier
-// update carried over (GTFS-Realtime propagation), marked as a prediction.
+// estimate returns the realtime departure or arrival at stop st.
 func (c Connection) estimate(u *realtime.Trip, st gtfs.StopTime, departure bool) realtime.Event {
+	return estimate(c.trip, c.ServiceDate, u, st, departure)
+}
+
+// estimate returns the realtime departure or arrival at stop st of trip on
+// date: the update for that stop if there is one, otherwise the delay of the
+// latest earlier update carried over (GTFS-Realtime propagation), marked as
+// a prediction.
+func estimate(trip *gtfs.Trip, date gtfs.Date, u *realtime.Trip, st gtfs.StopTime, departure bool) realtime.Event {
 	latest, ok := u.Latest(st.Sequence)
 	if !ok {
 		return realtime.Event{}
@@ -101,12 +107,12 @@ func (c Connection) estimate(u *realtime.Trip, st gtfs.StopTime, departure bool)
 	if ref.Time.IsZero() {
 		ref, refDeparture = latest.Arrival, false
 	}
-	refStop, ok := c.stopTime(latest.Sequence)
+	refStop, ok := stopTime(trip, latest.Sequence)
 	if ref.Time.IsZero() || !ok {
 		return realtime.Event{}
 	}
-	delay := ref.Time.Sub(c.ServiceDate.At(offset(refStop, refDeparture), warsaw))
-	return realtime.Event{Time: c.ServiceDate.At(offset(st, departure), warsaw).Add(delay)}
+	delay := ref.Time.Sub(date.At(offset(refStop, refDeparture), warsaw))
+	return realtime.Event{Time: date.At(offset(st, departure), warsaw).Add(delay)}
 }
 
 func pick(st realtime.Stop, departure bool) realtime.Event {
@@ -125,8 +131,9 @@ func offset(st gtfs.StopTime, departure bool) gtfs.Time {
 	return st.Arrival
 }
 
-func (c Connection) stopTime(seq uint32) (gtfs.StopTime, bool) {
-	sts := c.trip.StopTimes
+// stopTime finds the trip's stop with this stop_sequence.
+func stopTime(trip *gtfs.Trip, seq uint32) (gtfs.StopTime, bool) {
+	sts := trip.StopTimes
 	i, ok := slices.BinarySearchFunc(sts, seq, func(st gtfs.StopTime, seq uint32) int { return cmp.Compare(st.Sequence, seq) })
 	if !ok {
 		return gtfs.StopTime{}, false
