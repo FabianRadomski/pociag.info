@@ -56,7 +56,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	switch {
 	case len(parts) == 0:
-		s.notice(w, http.StatusOK, format, lang, str.Help)
+		setHeaders(w, format)
+		if err := render.Help(w, format, lang); err != nil {
+			slog.Debug("write help", "err", err)
+		}
 		return
 	case len(parts) == 1:
 		s.notice(w, http.StatusBadRequest, format, lang, str.NeedTwoStations)
