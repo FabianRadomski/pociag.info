@@ -1,0 +1,59 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# One deploy at a time; a newer push waits rather than cancelling one mid-install.
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test ./...
+
+      - name: Build
+        env:
+          CGO_ENABLED: "0"
+          GOOS: linux
+          GOARCH: amd64
+        run: go build -trimpath -ldflags='-s -w' -o pociag ./cmd/pociag
+
+      # The key on the server is restricted to a forced command that reads the
+      # binary from stdin and installs it (deploy/pociag-deploy), so there's no
+      # separate upload step and the key can't open a shell.
+      - name: Deploy
+        env:
+          DEPLOY_KEY: ${{ secrets.FROG_DEPLOY_KEY }}
+          KNOWN_HOSTS: ${{ secrets.FROG_KNOWN_HOSTS }}
+          TARGET: ${{ secrets.FROG_SSH_TARGET }}
+        run: |
+          install -d -m 0700 ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/deploy_key
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 0600 ~/.ssh/deploy_key ~/.ssh/known_hosts
+          ssh -i ~/.ssh/deploy_key \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile=~/.ssh/known_hosts \
+            -o BatchMode=yes \
+            -o ConnectTimeout=20 \
+            "$TARGET" < pociag

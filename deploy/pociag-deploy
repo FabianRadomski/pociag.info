@@ -1,0 +1,64 @@
+#!/bin/sh
+# Installs a pociag binary read from stdin, restarts the service and rolls
+# back to the previous binary if the new one doesn't answer.
+#
+# Install as root:  install -o root -g root -m 0755 pociag-deploy /usr/local/sbin/
+# It must stay root-owned and not writable by the deploy user: it runs as root
+# through a NOPASSWD sudo rule. See deploy/README.md.
+set -eu
+
+BIN=/usr/local/bin/pociag
+NEW=$BIN.new
+PREV=$BIN.prev
+SERVICE=pociag
+HEALTH_URL=http://127.0.0.1:8080/
+MAX_BYTES=$((64 * 1024 * 1024))
+
+log() { echo "pociag-deploy: $*" >&2; }
+fail() { log "$*"; exit 1; }
+
+healthy() {
+	i=0
+	while [ $i -lt 20 ]; do
+		if wget -q -O /dev/null -T 3 "$HEALTH_URL"; then
+			return 0
+		fi
+		i=$((i + 1))
+		sleep 1
+	done
+	return 1
+}
+
+[ $# -eq 0 ] || fail "takes no arguments"
+
+umask 022
+trap 'rm -f "$NEW"' EXIT
+
+# Read one byte past the limit so an oversized upload is caught, not truncated.
+head -c $((MAX_BYTES + 1)) >"$NEW"
+size=$(wc -c <"$NEW")
+[ "$size" -gt 0 ] || fail "no binary on stdin"
+[ "$size" -le "$MAX_BYTES" ] || fail "binary is over $MAX_BYTES bytes"
+[ "$(head -c 4 "$NEW" | od -An -tx1 | tr -d ' \n')" = 7f454c46 ] || fail "not an ELF binary"
+chmod 0755 "$NEW"
+
+if [ -e "$BIN" ]; then
+	cp -p "$BIN" "$PREV"
+fi
+mv -f "$NEW" "$BIN"
+log "installed new binary ($size bytes), restarting $SERVICE"
+rc-service "$SERVICE" restart
+
+if healthy; then
+	log "$SERVICE is up"
+	exit 0
+fi
+
+log "$SERVICE didn't answer on $HEALTH_URL"
+[ -e "$PREV" ] || fail "no previous binary to roll back to"
+cp -p "$PREV" "$BIN"
+rc-service "$SERVICE" restart
+if healthy; then
+	fail "rolled back to the previous binary"
+fi
+fail "rolled back, but $SERVICE still isn't answering"
