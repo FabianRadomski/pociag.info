@@ -33,6 +33,7 @@ type Connection struct {
 	Arrival           time.Time
 	DeparturePlatform string
 	Destination       string // trip headsign
+	From, To          string // names of the stations where you board and alight
 
 	// Keys for joining with GTFS-Realtime trip updates.
 	TripID      string
@@ -97,48 +98,81 @@ func (t *Timetable) StationNames() map[string]string { return t.names }
 // Connections returns up to n direct rides from station `from` to station
 // `to` departing at or after `after`, ordered by departure.
 func (t *Timetable) Connections(from, to string, after time.Time, n int) []Connection {
-	out := t.candidates(from, to, after)
+	out := t.candidates(from, to, after, time.Time{}, true, true)
 	return out[:min(max(n, 0), len(out))]
 }
 
 // candidates returns every ride from `from` to `to` scheduled to depart at
-// or after `since` within the search window, ordered by departure.
-func (t *Timetable) candidates(from, to string, since time.Time) []Connection {
-	first := gtfs.DateOf(since.In(warsaw)).AddDays(-t.daysBack)
-	days := t.daysBack + searchDays + 1
+// or after `since` within the search window, ordered by departure. A
+// non-zero `until` past the window extends it with whatever departs up to
+// `until`.
+//
+// With dropOff false (a via stop, ridden through or changed at), a ride ends
+// at the train's first call at `to`, even one where nobody may get off; if
+// it is one, the same train also gives a ride to its first later call at
+// `to` that does let you off, to change there.
+func (t *Timetable) candidates(from, to string, since, until time.Time, pickup, dropOff bool) []Connection {
+	first, window := t.window(since)
+	days := window
+	// A service day's trains leave from its midnight on.
+	for !until.IsZero() && !first.AddDays(days).At(0, warsaw).After(until) {
+		days++
+	}
 
 	var out []Connection
 	for _, ref := range t.byStation[from] {
 		origin := ref.trip.StopTimes[ref.idx]
-		if origin.NoPickup || origin.Departure == gtfs.NoTime {
+		if pickup && origin.NoPickup || origin.Departure == gtfs.NoTime {
 			continue
 		}
-		dest, ok := t.alightingAt(ref.trip, ref.idx, to)
+		dest, ok := t.alightingAt(ref.trip, ref.idx, to, dropOff)
 		if !ok {
 			continue
+		}
+		dests := []gtfs.StopTime{dest}
+		if dest.NoDropOff {
+			if off, ok := t.alightingAt(ref.trip, ref.idx, to, true); ok {
+				dests = append(dests, off)
+			}
 		}
 		for i := range days {
 			date := first.AddDays(i)
 			if !t.feed.Runs(ref.trip.ServiceID, date) {
 				continue
 			}
-			if date.At(origin.Departure, warsaw).Before(since) {
+			dep := date.At(origin.Departure, warsaw)
+			if dep.Before(since) || i >= window && dep.After(until) {
 				continue
 			}
-			out = append(out, t.connection(ref.trip, origin, dest, date))
+			for _, dest := range dests {
+				out = append(out, t.connection(ref.trip, origin, dest, date))
+			}
 		}
 	}
 	slices.SortFunc(out, func(a, b Connection) int {
-		return cmp.Or(a.Departure.Compare(b.Departure), cmp.Compare(a.TripID, b.TripID))
+		return cmp.Or(a.Departure.Compare(b.Departure), cmp.Compare(a.TripID, b.TripID), cmp.Compare(a.dest.Sequence, b.dest.Sequence))
 	})
 	return out
 }
 
+// window is the service days candidates searches by default: `days` of
+// them from `first`.
+func (t *Timetable) window(since time.Time) (first gtfs.Date, days int) {
+	return gtfs.DateOf(since.In(warsaw)).AddDays(-t.daysBack), t.daysBack + searchDays + 1
+}
+
+// windowEnd is when the first service day after the default window starts:
+// no train it leaves out is scheduled to leave earlier.
+func (t *Timetable) windowEnd(since time.Time) time.Time {
+	first, days := t.window(since)
+	return first.AddDays(days).At(0, warsaw)
+}
+
 // alightingAt finds the first stop after idx at station `to` where
-// passengers may get off.
-func (t *Timetable) alightingAt(trip *gtfs.Trip, idx int, to string) (gtfs.StopTime, bool) {
+// passengers may get off, or with dropOff false, where the train calls at all.
+func (t *Timetable) alightingAt(trip *gtfs.Trip, idx int, to string, dropOff bool) (gtfs.StopTime, bool) {
 	for _, st := range trip.StopTimes[idx+1:] {
-		if t.stationOf[st.StopID] == to && !st.NoDropOff && st.Arrival != gtfs.NoTime {
+		if t.stationOf[st.StopID] == to && (!dropOff || !st.NoDropOff) && st.Arrival != gtfs.NoTime {
 			return st, true
 		}
 	}
@@ -157,6 +191,8 @@ func (t *Timetable) connection(trip *gtfs.Trip, origin, dest gtfs.StopTime, date
 		Arrival:           date.At(dest.Arrival, warsaw),
 		DeparturePlatform: t.feed.Str(origin.Platform),
 		Destination:       trip.Headsign,
+		From:              t.names[t.stationOf[origin.StopID]],
+		To:                t.names[t.stationOf[dest.StopID]],
 		TripID:            trip.ID,
 		ServiceDate:       date,
 		trip:              trip,

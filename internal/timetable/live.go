@@ -26,11 +26,9 @@ func (t *Timetable) Live(from, to string, now time.Time, n int, snap *realtime.S
 		return nil
 	}
 	var out []Connection
-	for _, c := range t.candidates(from, to, now.Add(-maxDelay)) {
-		if u, ok := snap.Trip(c.TripID, c.ServiceDate); ok {
-			c.Live = c.live(u)
-		}
-		if c.leaves().Before(now) {
+	for _, c := range t.candidates(from, to, now.Add(-maxDelay), time.Time{}, true, true) {
+		c.merge(snap)
+		if c.Leaves().Before(now) {
 			continue
 		}
 		out = append(out, c)
@@ -41,18 +39,38 @@ func (t *Timetable) Live(from, to string, now time.Time, n int, snap *realtime.S
 	return out
 }
 
-// leaves is the best estimate of when the train leaves the origin.
-func (c Connection) leaves() time.Time {
+// merge attaches realtime data from snap, if it has any for this trip.
+func (c *Connection) merge(snap *realtime.Snapshot) {
+	if u, ok := snap.Trip(c.TripID, c.ServiceDate); ok {
+		c.Live = c.live(u)
+	}
+}
+
+// Leaves is the best estimate of when the train leaves the origin.
+func (c Connection) Leaves() time.Time {
 	if c.Live != nil && !c.Live.Cancelled && !c.Live.Departure.Time.IsZero() {
 		return c.Live.Departure.Time
 	}
 	return c.Departure
 }
 
+// Arrives is the best estimate of when the train reaches the destination.
+func (c Connection) Arrives() time.Time {
+	if c.Live != nil && !c.Live.Cancelled && !c.Live.Arrival.Time.IsZero() {
+		return c.Live.Arrival.Time
+	}
+	return c.Arrival
+}
+
 func (c Connection) live(u *realtime.Trip) *Live {
 	if u.Cancelled || skipped(u, c.origin.Sequence) || skipped(u, c.dest.Sequence) {
 		return &Live{Cancelled: true}
 	}
+	return c.estimates(u)
+}
+
+// estimates is Live without the cancellation checks.
+func (c Connection) estimates(u *realtime.Trip) *Live {
 	return &Live{
 		Departure: c.estimate(u, c.origin, true),
 		Arrival:   c.estimate(u, c.dest, false),
