@@ -112,8 +112,7 @@ func (t *Timetable) Connections(from, to string, after time.Time, n int) []Conne
 // it is one, the same train also gives a ride to its first later call at
 // `to` that does let you off, to change there.
 func (t *Timetable) candidates(from, to string, since, until time.Time, pickup, dropOff bool) []Connection {
-	first := gtfs.DateOf(since.In(warsaw)).AddDays(-t.daysBack)
-	window := t.daysBack + searchDays + 1
+	first, window := t.window(since)
 	days := window
 	// A service day's trains leave from its midnight on.
 	for !until.IsZero() && !first.AddDays(days).At(0, warsaw).After(until) {
@@ -154,6 +153,19 @@ func (t *Timetable) candidates(from, to string, since, until time.Time, pickup, 
 		return cmp.Or(a.Departure.Compare(b.Departure), cmp.Compare(a.TripID, b.TripID), cmp.Compare(a.dest.Sequence, b.dest.Sequence))
 	})
 	return out
+}
+
+// window is the service days candidates searches by default: `days` of
+// them from `first`.
+func (t *Timetable) window(since time.Time) (first gtfs.Date, days int) {
+	return gtfs.DateOf(since.In(warsaw)).AddDays(-t.daysBack), t.daysBack + searchDays + 1
+}
+
+// windowEnd is when the first service day after the default window starts:
+// no train it leaves out is scheduled to leave earlier.
+func (t *Timetable) windowEnd(since time.Time) time.Time {
+	first, days := t.window(since)
+	return first.AddDays(days).At(0, warsaw)
 }
 
 // alightingAt finds the first stop after idx at station `to` where

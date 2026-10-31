@@ -32,20 +32,34 @@ func (t *Timetable) Via(stops []string, now time.Time, n int, change time.Durati
 	if n <= 0 || len(stops) < 2 {
 		return nil
 	}
+	// Legs near the end of the search window arrive after it, and their
+	// best way on may leave later still. Looking past the window costs
+	// about twice as much on a busy line, so it is only done when the
+	// journeys found within it could be beaten or missing.
+	out, firsts := t.via(stops, now, change, snap, false)
+	if !settled(out, firsts, n, t.windowEnd(now.Add(-maxDelay))) {
+		out, _ = t.via(stops, now, change, snap, true)
+	}
+	return out[:min(n, len(out))]
+}
+
+// via finds the journeys for Via, all of them, and the legs of the first
+// segment. With beyond, the segments after the first also look past the
+// search window, for trains leaving up to the end of the day after the
+// previous segment's last arrival.
+func (t *Timetable) via(stops []string, now time.Time, change time.Duration, snap *realtime.Snapshot, beyond bool) (out []Journey, firsts []Connection) {
 	// Via stops may forbid boarding or alighting: such legs still serve a
 	// train ridden straight through, and plan keeps changes off them.
-	//
-	// Legs near the end of the window arrive after it, so each later
-	// segment also looks past the window, for trains leaving up to the end
-	// of the day after the previous segment's last arrival.
 	segs := make([][]Connection, len(stops)-1)
 	var until time.Time
 	for i := range segs {
 		if i > 0 {
 			if len(segs[i-1]) == 0 {
-				return nil
+				return nil, segs[0]
 			}
-			until = dayAfter(segs[i-1])
+			if beyond {
+				until = dayAfter(segs[i-1])
+			}
 		}
 		for _, c := range t.candidates(stops[i], stops[i+1], now.Add(-maxDelay), until, i == 0, i == len(segs)-1) {
 			if mergeVia(&c, snap, i == 0, i == len(segs)-1) {
@@ -77,7 +91,6 @@ func (t *Timetable) Via(stops []string, now time.Time, n int, change time.Durati
 		}
 		return b.Arrives().Compare(a.Arrives())
 	})
-	var out []Journey
 	for i := len(all) - 1; i >= 0; i-- {
 		if len(out) > 0 && !all[i].Arrives().Before(out[len(out)-1].Arrives()) {
 			continue
@@ -88,7 +101,37 @@ func (t *Timetable) Via(stops []string, now time.Time, n int, change time.Durati
 	// List them like the direct board, by scheduled departure, so a delayed
 	// train keeps its place under its own day's heading.
 	slices.SortStableFunc(out, func(a, b Journey) int { return a.Legs[0].Departure.Compare(b.Legs[0].Departure) })
-	return out[:min(n, len(out))]
+	return out, segs[0]
+}
+
+// settled reports whether the first n journeys found within the search
+// window are final. Every train past the window leaves at `end` or later
+// (trains don't run early), so a journey using one arrives after `end`:
+// it can't beat a journey arriving before `end`, and it is dropped if
+// one of those leaves no earlier. So they are final if there are n, each
+// arrives before `end`, and no first leg listed up to the last of them
+// leaves later than all of them, which only a delayed train can.
+func settled(out []Journey, firsts []Connection, n int, end time.Time) bool {
+	if len(out) < n {
+		return false
+	}
+	shown := out[:n]
+	var latest time.Time
+	for _, j := range shown {
+		if !j.Arrives().Before(end) {
+			return false
+		}
+		if j.Leaves().After(latest) {
+			latest = j.Leaves()
+		}
+	}
+	last := shown[n-1].Legs[0].Departure
+	for _, c := range firsts {
+		if !c.Departure.After(last) && c.Leaves().After(latest) {
+			return false
+		}
+	}
+	return true
 }
 
 // dayAfter is midnight at the end of the day after the last of legs

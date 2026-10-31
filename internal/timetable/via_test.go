@@ -10,6 +10,7 @@ import (
 	rt "github.com/MobilityData/gtfs-realtime-bindings/golang/gtfs"
 	"google.golang.org/protobuf/proto"
 
+	"pociag.info/internal/gtfs"
 	"pociag.info/internal/realtime"
 )
 
@@ -457,4 +458,76 @@ func TestVia_OnwardTrainAfterWindow(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestVia_LateArrivalLooksPastWindow: within the window the only way on
+// from Beta, BC1, arrives after the window ends, so a train past the
+// window may beat it, and BC2 does. BC1 runs past midnight, so daysBack is
+// 1 and with now 2026-10-27 12:00 the window is service days
+// 10-26..10-29, ending 10-30 00:00 (clear of the 10-25 clock change).
+// Asking for one journey, one is found
+// within the window, so only its late arrival shows it may not be final.
+func TestVia_LateArrivalLooksPastWindow(t *testing.T) {
+	feed := fstest.MapFS{
+		"agency.txt": viaFeed["agency.txt"],
+		"routes.txt": viaFeed["routes.txt"],
+		"stops.txt":  viaFeed["stops.txt"],
+		"trips.txt": {Data: []byte("trip_id,route_id,service_id,trip_headsign,plk_category_code,plk_train_number,plk_train_name\n" +
+			"AB,KD,S1,Beta,KD,AB,\nBC1,KD,S1,Gamma,KD,BC1,\nBC2,KD,S2,Gamma,KD,BC2,\n")},
+		"stop_times.txt": {Data: []byte("trip_id,stop_sequence,stop_id,arrival_time,departure_time\n" +
+			"AB,0,A,20:00:00,20:00:00\nAB,1,B,21:00:00,21:00:00\n" +
+			"BC1,0,B,22:00:00,22:00:00\nBC1,1,C,26:00:00,26:00:00\n" +
+			"BC2,0,B,00:30:00,00:30:00\nBC2,1,C,01:00:00,01:00:00\n")},
+		"calendar_dates.txt": {Data: []byte("service_id,date,exception_type\nS1,20261029,1\nS2,20261030,1\n")},
+	}
+	got := newTimetable(t, feed).Via([]string{"A", "B", "C"}, at("2026-10-27", "12:00"), 1, 5*time.Minute, nil)
+	want := "20:00 AB Alfa-Beta 21:00 | 00:30 BC2 Beta-Gamma 01:00"
+	if len(got) != 1 || journeySummary(got[0]) != want {
+		g := make([]string, len(got))
+		for i, j := range got {
+			g[i] = journeySummary(j)
+		}
+		t.Errorf("got %q, want [%q]", g, want)
+	}
+}
+
+// TestVia_SameAsWiderSearch: Via only looks past the search window when
+// the journeys within it might not be final; the result must match always
+// looking past it.
+func TestVia_SameAsWiderSearch(t *testing.T) {
+	feed, err := gtfs.Load(benchFeed(40, 15))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tt := New(feed)
+	short := 0
+	for _, stops := range [][]string{{"A", "B", "C"}, {"A", "B", "C", "D"}, {"A", "B", "C", "D", "E"}} {
+		for day := 22; day <= 27; day++ {
+			for hour := 0; hour < 24; hour += 3 {
+				now := time.Date(2026, 10, day, hour, 0, 0, 0, warsaw)
+				wide, _ := tt.via(stops, now, 5*time.Minute, nil, true)
+				for _, n := range []int{1, 3, 10} {
+					got := tt.Via(stops, now, n, 5*time.Minute, nil)
+					want := wide[:min(n, len(wide))]
+					g, w := make([]string, len(got)), make([]string, len(want))
+					for i, j := range got {
+						g[i] = journeySummary(j)
+					}
+					for i, j := range want {
+						w[i] = journeySummary(j)
+					}
+					if strings.Join(g, "\n") != strings.Join(w, "\n") {
+						t.Fatalf("%v at %v, n=%d:\n got:\n  %s\nwant:\n  %s", stops, now, n, strings.Join(g, "\n  "), strings.Join(w, "\n  "))
+					}
+					if out, firsts := tt.via(stops, now, 5*time.Minute, nil, false); settled(out, firsts, n, tt.windowEnd(now.Add(-maxDelay))) {
+						short++
+					}
+				}
+			}
+		}
+	}
+	if short == 0 {
+		t.Error("no search was settled within the window; the test checks nothing")
+	}
+	t.Logf("%d searches settled within the window", short)
 }
