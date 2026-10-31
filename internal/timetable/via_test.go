@@ -315,3 +315,62 @@ func TestWayCompare(t *testing.T) {
 		}
 	}
 }
+
+// TestVia_SkippedViaStop: realtime says a train won't stop at the via
+// station. Riding through it is still fine, but nobody gets off or on
+// there. Skipping the journey's own first or last stop, or cancelling the
+// whole train, does lose the ride.
+func TestVia_SkippedViaStop(t *testing.T) {
+	trips := "trip_id,route_id,service_id,trip_headsign,plk_category_code,plk_train_number,plk_train_name\n" +
+		"X,KD,S,Gamma,KD,X,\nY,KD,S,Gamma,KD,Y,\n"
+	x := "X,0,A,08:00:00,08:00:00\nX,1,B,09:00:00,09:00:00\nX,2,C,10:00:00,10:00:00\n"
+	// Y would be the best change at Beta off X.
+	y := "Y,0,B,09:10:00,09:10:00\nY,1,C,09:40:00,09:40:00\n"
+	feed := func(stopTimes string) *Timetable {
+		return newTimetable(t, fstest.MapFS{
+			"agency.txt":         viaFeed["agency.txt"],
+			"routes.txt":         viaFeed["routes.txt"],
+			"stops.txt":          viaFeed["stops.txt"],
+			"trips.txt":          {Data: []byte(trips)},
+			"stop_times.txt":     {Data: []byte("trip_id,stop_sequence,stop_id,arrival_time,departure_time\n" + stopTimes)},
+			"calendar_dates.txt": viaFeed["calendar_dates.txt"],
+		})
+	}
+	onlyX, withY := feed(x), feed(x+y)
+	tests := []struct {
+		name string
+		tt   *Timetable
+		snap *realtime.Snapshot
+		want []string
+	}{
+		{"no realtime", onlyX, nil, []string{"08:00 X Alfa-Gamma 10:00"}},
+		{"via stop skipped: still one ride", onlyX,
+			snapshot(t, "X", rt.TripDescriptor_SCHEDULED, skip(1)),
+			[]string{"08:00 X Alfa-Gamma 10:00"}},
+		{"via stop skipped: the joined ride has live times", onlyX,
+			snapshot(t, "X", rt.TripDescriptor_SCHEDULED, upd(0, nil, ev("08:10", true)), skip(1), upd(2, ev("10:12", false), nil)),
+			[]string{"08:10 X Alfa-Gamma 10:12"}},
+		{"first stop skipped", onlyX, snapshot(t, "X", rt.TripDescriptor_SCHEDULED, skip(0)), []string{}},
+		{"last stop skipped", onlyX, snapshot(t, "X", rt.TripDescriptor_SCHEDULED, skip(2)), []string{}},
+		{"train cancelled", onlyX, snapshot(t, "X", rt.TripDescriptor_CANCELED), []string{}},
+		{"change at Beta", withY, nil, []string{"08:00 X Alfa-Beta 09:00 | 09:10 Y Beta-Gamma 09:40"}},
+		{"no change at a skipped Beta", withY,
+			snapshot(t, "X", rt.TripDescriptor_SCHEDULED, skip(1)),
+			[]string{"08:00 X Alfa-Gamma 10:00"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := tc.tt.Via([]string{"A", "B", "C"}, at("2026-10-22", "00:00"), 10, 5*time.Minute, tc.snap)
+			g := make([]string, len(got))
+			for i, j := range got {
+				g[i] = journeySummary(j)
+				if c := j.Legs[0]; c.Live != nil && c.Live.Cancelled {
+					t.Errorf("%s: first leg marked cancelled", g[i])
+				}
+			}
+			if strings.Join(g, "\n") != strings.Join(tc.want, "\n") {
+				t.Errorf("journeys mismatch\n got:\n  %s\nwant:\n  %s", strings.Join(g, "\n  "), strings.Join(tc.want, "\n  "))
+			}
+		})
+	}
+}

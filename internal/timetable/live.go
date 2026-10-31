@@ -66,6 +66,11 @@ func (c Connection) live(u *realtime.Trip) *Live {
 	if u.Cancelled || skipped(u, c.origin.Sequence) || skipped(u, c.dest.Sequence) {
 		return &Live{Cancelled: true}
 	}
+	return c.estimates(u)
+}
+
+// estimates is Live without the cancellation checks.
+func (c Connection) estimates(u *realtime.Trip) *Live {
 	return &Live{
 		Departure: c.estimate(u, c.origin, true),
 		Arrival:   c.estimate(u, c.dest, false),

@@ -37,8 +37,7 @@ func (t *Timetable) Via(stops []string, now time.Time, n int, change time.Durati
 	segs := make([][]Connection, len(stops)-1)
 	for i := range segs {
 		for _, c := range t.candidates(stops[i], stops[i+1], now.Add(-maxDelay), i == 0, i == len(segs)-1) {
-			c.merge(snap)
-			if c.Live == nil || !c.Live.Cancelled {
+			if mergeVia(&c, snap, i == 0, i == len(segs)-1) {
 				segs[i] = append(segs[i], c)
 			}
 		}
@@ -79,6 +78,36 @@ func (t *Timetable) Via(stops []string, now time.Time, n int, change time.Durati
 	// train keeps its place under its own day's heading.
 	slices.SortStableFunc(out, func(a, b Journey) int { return a.Legs[0].Departure.Compare(b.Legs[0].Departure) })
 	return out[:min(n, len(out))]
+}
+
+// mergeVia attaches realtime data to a leg of a via journey and reports
+// whether the leg can still be used. A skipped via stop doesn't cancel the
+// ride, it only stops anyone getting off or on there, like a stop that only
+// picks up or sets down; joinThrough later merges the whole ride again.
+// Only a cancelled train or a skipped first or last stop of the journey
+// drops the leg.
+func mergeVia(c *Connection, snap *realtime.Snapshot, first, last bool) bool {
+	u, ok := snap.Trip(c.TripID, c.ServiceDate)
+	if !ok {
+		return true
+	}
+	if u.Cancelled {
+		return false
+	}
+	if skipped(u, c.origin.Sequence) {
+		if first {
+			return false
+		}
+		c.origin.NoPickup = true
+	}
+	if skipped(u, c.dest.Sequence) {
+		if last {
+			return false
+		}
+		c.dest.NoDropOff = true
+	}
+	c.Live = c.estimates(u)
+	return true
 }
 
 // end is the best way to finish a journey from a leg: the index of the leg
