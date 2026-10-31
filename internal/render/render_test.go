@@ -255,6 +255,23 @@ func TestHelp(t *testing.T) {
 			t.Errorf("browser help is missing %s", link)
 		}
 	}
+
+	// On small screens every line is a block that wraps at its indent, and
+	// an option's description goes under it.
+	narrow := regexp.MustCompile(`(?s)<pre class="narrow">(.*?)</pre>`).FindStringSubmatch(buf.String())
+	if narrow == nil {
+		t.Fatal("no narrow <pre> block")
+	}
+	for _, want := range []string{
+		`<span class="train">`,
+		`<span class="ln head"><span class="bold">pociag.info — check train timetables`,
+		`<span class="ln" style="padding-left: 2ch">?n=5</span><span class="ln" style="padding-left: 4ch">number of trains`,
+		`<span class="ln"><span class="dim">Data:</span></span>`,
+	} {
+		if !strings.Contains(narrow[1], want) {
+			t.Errorf("narrow help is missing %s:\n%s", want, narrow[1])
+		}
+	}
 }
 
 func TestStringsExistInBothLanguages(t *testing.T) {
