@@ -212,3 +212,88 @@ func TestStringsExistInBothLanguages(t *testing.T) {
 		}
 	}
 }
+
+func viaBoard() Board {
+	return Board{
+		Lang: EN,
+		From: "Wrocław Główny",
+		To:   "Gdańsk Główny",
+		Via:  []string{"Poznań Główny", "Bydgoszcz Główna"},
+		Now:  at("2026-10-22 20:27:00"),
+		Journeys: []timetable.Journey{
+			{Legs: []timetable.Connection{
+				{
+					Category: "IC", Number: "1234", Name: "ODRA",
+					Departure: at("2026-10-22 21:12:00"), Arrival: at("2026-10-22 22:58:00"),
+					DeparturePlatform: "3", Destination: "Szczecin Główny",
+					From: "Wrocław Główny", To: "Poznań Główny",
+					Live: &timetable.Live{Departure: predicted("2026-10-22 21:16:00"), Arrival: predicted("2026-10-22 23:02:00")},
+				},
+				{
+					Category: "IC", Number: "5432", Name: "KASZUBY",
+					Departure: at("2026-10-22 23:15:00"), Arrival: at("2026-10-23 01:40:00"),
+					DeparturePlatform: "1", Destination: "Gdynia Główna",
+					From: "Poznań Główny", To: "Gdańsk Główny",
+				},
+			}},
+			{Legs: []timetable.Connection{
+				{
+					Category: "TLK", Number: "61100", Departure: at("2026-10-23 05:00:00"), Arrival: at("2026-10-23 07:00:00"),
+					DeparturePlatform: "2", Destination: "Poznań Główny",
+					From: "Wrocław Główny", To: "Poznań Główny",
+				},
+				{
+					Category: "KW", Number: "77000", Departure: at("2026-10-23 07:10:00"), Arrival: at("2026-10-23 09:00:00"),
+					Destination: "Bydgoszcz Główna",
+					From:        "Poznań Główny", To: "Bydgoszcz Główna",
+				},
+				{
+					Category: "IC", Number: "38100", Departure: at("2026-10-23 09:20:00"), Arrival: at("2026-10-23 11:00:00"),
+					DeparturePlatform: "4", Destination: "Gdańsk Główny",
+					From: "Bydgoszcz Główna", To: "Gdańsk Główny",
+				},
+			}},
+		},
+	}
+}
+
+func TestText_Via(t *testing.T) {
+	got := text(t, viaBoard(), false)
+
+	assertText(t, got, `Wrocław Główny → Gdańsk Główny, via Poznań Główny, Bydgoszcz Główna
+Thursday, 22.10.2026, 20:27
+
+Departs   Arrives   Train            Towards           Platform
+21:12 +4  22:58 +4  IC 1234 ODRA     Szczecin Główny   3
+          change in Poznań Główny, 13 min
+23:15     01:40     IC 5432 KASZUBY  Gdynia Główna     1
+
+── Friday, 23.10 ──
+05:00     07:00     TLK 61100        Poznań Główny     2
+          change in Poznań Główny, 10 min
+07:10     09:00     KW 77000         Bydgoszcz Główna
+          change in Bydgoszcz Główna, 20 min
+09:20     11:00     IC 38100         Gdańsk Główny     4
+
+No live data
+Data: PKP PLK S.A. · GTFS: Mikołaj Kuranowski
+`)
+}
+
+func TestText_ViaANSI(t *testing.T) {
+	got := text(t, viaBoard(), true)
+
+	if !strings.Contains(got, "          \x1b[2mchange in Poznań Główny, 13 min\x1b[0m\n") {
+		t.Errorf("change line not indented and dimmed:\n%q", got)
+	}
+}
+
+func TestText_ViaNoJourneys(t *testing.T) {
+	b := viaBoard()
+	b.Journeys = nil
+	got := text(t, b, false)
+
+	if !strings.Contains(got, "\nNo connections via these stations in the next few days.\n") {
+		t.Errorf("missing no-journeys message:\n%s", got)
+	}
+}

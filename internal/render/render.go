@@ -37,6 +37,11 @@ type Board struct {
 	Now         time.Time
 	LiveAt      time.Time // zero when there is no realtime data
 	Connections []timetable.Connection
+
+	// Via stations, in order; when set, Journeys are shown instead of
+	// Connections.
+	Via      []string
+	Journeys []timetable.Journey
 }
 
 // Text writes the board for a terminal, with ANSI colours if color is set.
@@ -122,10 +127,12 @@ func (c cell) render(f Format) string {
 
 func plain(s string) cell { return cell{{text: s}} }
 
-// row is either a table row or a full-width line such as a day separator.
+// row is either a table row or a line such as a day separator, which starts
+// at column lineCol and runs to the end.
 type row struct {
-	cells []cell
-	line  cell
+	cells   []cell
+	line    cell
+	lineCol int
 }
 
 func board(b Board, f Format) string {
@@ -133,16 +140,22 @@ func board(b Board, f Format) string {
 	var out strings.Builder
 	now := b.Now.In(warsaw)
 
-	out.WriteString(style(f, styleBold, b.From+" → "+b.To) + "\n")
+	title := b.From + " → " + b.To
+	if len(b.Via) > 0 {
+		title += ", " + s.Via + " " + strings.Join(b.Via, ", ")
+	}
+	out.WriteString(style(f, styleBold, title) + "\n")
 	out.WriteString(s.longDate(now) + ", " + now.Format("15:04") + "\n\n")
 
-	if len(b.Connections) == 0 {
+	switch {
+	case len(b.Via) > 0 && len(b.Journeys) == 0:
+		out.WriteString(style(f, "", s.NoJourneys) + "\n")
+	case len(b.Via) > 0:
+		out.WriteString(table(journeyRows(b.Journeys, now, s), f))
+	case len(b.Connections) == 0:
 		out.WriteString(style(f, "", s.NoConnections) + "\n")
-	} else {
-		rows := []row{{cells: []cell{
-			{{s.Departs, styleBold}}, {{s.Arrives, styleBold}}, {{s.Train, styleBold}},
-			{{s.Towards, styleBold}}, {{s.Platform, styleBold}},
-		}}}
+	default:
+		rows := []row{headerRow(s)}
 		day := dateOf(now)
 		for _, c := range b.Connections {
 			dep := c.Departure.In(warsaw)
@@ -163,6 +176,40 @@ func board(b Board, f Format) string {
 	}
 	out.WriteString(style(f, styleDim, s.Credits) + "\n")
 	return out.String()
+}
+
+func headerRow(s Strings) row {
+	return row{cells: []cell{
+		{{s.Departs, styleBold}}, {{s.Arrives, styleBold}}, {{s.Train, styleBold}},
+		{{s.Towards, styleBold}}, {{s.Platform, styleBold}},
+	}}
+}
+
+// journeyRows lists each journey's legs with a change line between them.
+// A blank line sets off journeys with changes; through trains read like the
+// direct board.
+func journeyRows(journeys []timetable.Journey, now time.Time, s Strings) []row {
+	rows := []row{headerRow(s)}
+	day := dateOf(now)
+	for i, j := range journeys {
+		if i > 0 && (len(j.Legs) > 1 || len(journeys[i-1].Legs) > 1) {
+			rows = append(rows, row{line: cell{}})
+		}
+		dep := j.Legs[0].Departure.In(warsaw)
+		if d := dateOf(dep); d != day {
+			day = d
+			rows = append(rows, row{line: plain("── " + s.shortDate(dep) + " ──")})
+		}
+		for k, c := range j.Legs {
+			if k > 0 {
+				prev := j.Legs[k-1]
+				wait := int(max(c.Leaves().Sub(prev.Arrives()), 0).Round(time.Minute) / time.Minute)
+				rows = append(rows, row{line: cell{{fmt.Sprintf(s.ChangeAt, prev.To, wait), styleDim}}, lineCol: 1})
+			}
+			rows = append(rows, row{cells: connectionCells(c, s)})
+		}
+	}
+	return rows
 }
 
 func connectionCells(c timetable.Connection, s Strings) []cell {
@@ -220,6 +267,13 @@ func table(rows []row, f Format) string {
 	var out strings.Builder
 	for _, r := range rows {
 		if r.cells == nil {
+			indent := 0
+			for _, w := range widths[:min(r.lineCol, len(widths))] {
+				indent += w + 2
+			}
+			if r.line.width() > 0 {
+				out.WriteString(strings.Repeat(" ", indent))
+			}
 			out.WriteString(r.line.render(f) + "\n")
 			continue
 		}

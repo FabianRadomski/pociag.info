@@ -33,6 +33,7 @@ type Connection struct {
 	Arrival           time.Time
 	DeparturePlatform string
 	Destination       string // trip headsign
+	From, To          string // names of the stations where you board and alight
 
 	// Keys for joining with GTFS-Realtime trip updates.
 	TripID      string
@@ -157,6 +158,8 @@ func (t *Timetable) connection(trip *gtfs.Trip, origin, dest gtfs.StopTime, date
 		Arrival:           date.At(dest.Arrival, warsaw),
 		DeparturePlatform: t.feed.Str(origin.Platform),
 		Destination:       trip.Headsign,
+		From:              t.names[t.stationOf[origin.StopID]],
+		To:                t.names[t.stationOf[dest.StopID]],
 		TripID:            trip.ID,
 		ServiceDate:       date,
 		trip:              trip,

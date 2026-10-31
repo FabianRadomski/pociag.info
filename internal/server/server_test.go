@@ -188,8 +188,11 @@ func TestErrors(t *testing.T) {
 		{"/Xyzzy/Krakow", http.StatusNotFound, "Nie znaleziono stacji „Xyzzy”."},
 		{"/Wroclaw/Xyzzy?lang=en", http.StatusNotFound, "Station not found: „Xyzzy”."},
 		{"/Wroclaw", http.StatusBadRequest, "Podaj stację początkową i docelową"},
-		{"/Wroclaw/Krakow/Katowice", http.StatusBadRequest, "Podaj stację początkową i docelową"},
 		{"/Wroclaw/Wroclaw%20Glowny", http.StatusBadRequest, "ta sama stacja: Wrocław Główny"},
+		{"/Wroclaw/Opole/Wroclaw-Glowny", http.StatusBadRequest, "Stacja Wrocław Główny występuje w trasie więcej niż raz."},
+		{"/Wroclaw/Brzeg/Opole/Wroclaw?lang=en", http.StatusBadRequest, "Wrocław Główny appears more than once"},
+		{"/Wroclaw/Brzeg/Opole/Brzeg-Dolny/Krakow", http.StatusOK, "Wrocław Główny → Kraków Główny, przez"},
+		{"/Wroclaw/Brzeg/Opole/Brzeg-Dolny/Kolobrzeg/Krakow", http.StatusBadRequest, "najwyżej trzy stacje pośrednie"},
 	}
 	for _, tc := range tests {
 		r := get(t, s, tc.path)
@@ -243,5 +246,36 @@ func TestStaleRealtimeIsIgnored(t *testing.T) {
 	mustContain(t, r.body, "Brak danych na żywo")
 	if strings.Contains(r.body, "Opóźnienia: stan na") {
 		t.Error("stale snapshot still reported")
+	}
+}
+
+func TestVia_ThroughTrainsAreOneLeg(t *testing.T) {
+	r := get(t, newServer(t, snapshotTime), "/Wroclaw/Opole/Krakow?T&lang=en")
+
+	if r.status != http.StatusOK {
+		t.Fatalf("status %d\n%s", r.status, r.body)
+	}
+	mustContain(t, r.body,
+		"Wrocław Główny → Kraków Główny, via Opole Główne",
+		"20:53 +4  23:43    IC 73004/5 ODRA        Kraków Główny    3\n── Friday, 23.10 ──\n03:10     06:33    IC 73010/1 URSA",
+		"Live data as of 20:26",
+	)
+}
+
+func TestVia_Change(t *testing.T) {
+	for _, tc := range []struct {
+		query string
+		want  time.Duration
+	}{
+		{"", 5 * time.Minute},
+		{"?change=0", 0},
+		{"?change=15", 15 * time.Minute},
+		{"?change=-1", 5 * time.Minute},
+		{"?change=abc", 5 * time.Minute},
+		{"?change=600", 60 * time.Minute},
+	} {
+		if got := change(httptest.NewRequest(http.MethodGet, "/a/b/c"+tc.query, nil)); got != tc.want {
+			t.Errorf("%q: change %v, want %v", tc.query, got, tc.want)
+		}
 	}
 }

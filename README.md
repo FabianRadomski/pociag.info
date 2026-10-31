@@ -27,11 +27,25 @@ Data: PKP PLK S.A. · GTFS: Mikołaj Kuranowski
 
 Open the same URLs in a browser to get an HTML page: [pociag.info](https://pociag.info/)
 
+To change trains, add up to three via stations between the start and the
+destination:
+
+```sh
+curl pociag.info/Wroclaw/Poznan/Gdansk
+curl 'pociag.info/Wroclaw/Poznan/Warszawa/Gdansk?change=15'
+```
+
+The journey passes through the via stations in order, on direct trains
+between them. At each one it takes the train that gets there earliest out of
+those leaving at least `?change` minutes later. A train that runs through a
+via station is shown as one ride.
+
 
 There are a few options that modify the output:
 | Option     | Meaning                                                   |
 |------------|-----------------------------------------------------------|
 | `?n=5`     | number of trains, 1–20 (default 8)                         |
+| `?change=15` | minimum change time at via stations in minutes, 0–60 (default 5) |
 | `?lang=en` | English; otherwise taken from `Accept-Language`, default Polish |
 | `?T`       | plain text without colours                                 |
 

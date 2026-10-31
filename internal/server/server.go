@@ -20,6 +20,10 @@ import (
 const (
 	defaultCount = 8
 	maxCount     = 20
+	maxVia       = 3
+	// Minimum change time at a via station, in minutes.
+	defaultChange = 5
+	maxChange     = 60
 	// Older realtime data is worse than none: it would show stale delays.
 	maxSnapshotAge = 30 * time.Minute
 )
@@ -50,13 +54,15 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if path != "" && path != ":help" {
 		parts = strings.Split(path, "/")
 	}
-	switch len(parts) {
-	case 0:
+	switch {
+	case len(parts) == 0:
 		s.notice(w, http.StatusOK, format, lang, str.Help)
 		return
-	case 2:
-	default:
+	case len(parts) == 1:
 		s.notice(w, http.StatusBadRequest, format, lang, str.NeedTwoStations)
+		return
+	case len(parts) > 2+maxVia:
+		s.notice(w, http.StatusBadRequest, format, lang, str.TooManyStations)
 		return
 	}
 
@@ -67,20 +73,26 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.notice(w, http.StatusServiceUnavailable, format, lang, str.Loading)
 		return
 	}
-	var resolved [2]stations.Station
+	resolved := make([]stations.Station, len(parts))
+	seen := map[string]bool{}
 	for i, q := range parts {
 		st, err := static.Stations.Resolve(q)
 		if errors.Is(err, stations.ErrNotFound) {
 			s.notice(w, http.StatusNotFound, format, lang, fmt.Sprintf(str.StationNotFound, q))
 			return
 		}
+		if seen[st.ID] {
+			msg := fmt.Sprintf(str.RepeatedStation, st.Name)
+			if len(parts) == 2 {
+				msg = fmt.Sprintf(str.SameStation, st.Name)
+			}
+			s.notice(w, http.StatusBadRequest, format, lang, msg)
+			return
+		}
+		seen[st.ID] = true
 		resolved[i] = st
 	}
-	from, to := resolved[0], resolved[1]
-	if from.ID == to.ID {
-		s.notice(w, http.StatusBadRequest, format, lang, fmt.Sprintf(str.SameStation, from.Name))
-		return
-	}
+	from, to := resolved[0], resolved[len(resolved)-1]
 
 	now := s.now()
 	snap := s.Data.Snapshot()
@@ -88,11 +100,22 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		snap = nil
 	}
 	board := render.Board{
-		Lang:        lang,
-		From:        from.Name,
-		To:          to.Name,
-		Now:         now,
-		Connections: static.Timetable.Live(from.ID, to.ID, now, count(r), snap),
+		Lang: lang,
+		From: from.Name,
+		To:   to.Name,
+		Now:  now,
+	}
+	if len(resolved) == 2 {
+		board.Connections = static.Timetable.Live(from.ID, to.ID, now, count(r), snap)
+	} else {
+		ids := make([]string, len(resolved))
+		for i, st := range resolved {
+			ids[i] = st.ID
+		}
+		for _, st := range resolved[1 : len(resolved)-1] {
+			board.Via = append(board.Via, st.Name)
+		}
+		board.Journeys = static.Timetable.Via(ids, now, count(r), change(r), snap)
 	}
 	if snap != nil {
 		board.LiveAt = snap.Timestamp
@@ -168,6 +191,16 @@ func language(r *http.Request) render.Lang {
 		}
 	}
 	return render.PL
+}
+
+// change is the minimum change time at via stations from ?change=, in
+// minutes.
+func change(r *http.Request) time.Duration {
+	m, err := strconv.Atoi(r.URL.Query().Get("change"))
+	if err != nil || m < 0 {
+		m = defaultChange
+	}
+	return time.Duration(min(m, maxChange)) * time.Minute
 }
 
 func count(r *http.Request) int {
