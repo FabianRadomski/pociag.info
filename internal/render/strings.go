@@ -45,13 +45,13 @@ var strs = map[Lang]Strings{
 		NeedTwoStations: "Podaj stację początkową i docelową, np. curl pociag.info/Wroclaw/Krakow",
 		SameStation:     "Stacja początkowa i docelowa to ta sama stacja: %s.",
 		RepeatedStation: "Stacja %s występuje w trasie więcej niż raz.",
-		TooManyStations: "Podaj najwyżej trzy stacje pośrednie, np. curl pociag.info/Wroclaw/Poznan/Gdansk",
+		TooManyStations: "Podaj najwyżej trzy stacje pośrednie, np. curl pociag.info/Opole/Poznan/Torun",
 		Loading:         "Wczytuję rozkład, spróbuj za chwilę.",
 		HelpTitle:       "pociag.info — sprawdź rozkład jazdy pociągów w terminalu i przeglądarce",
 		Help: `  curl pociag.info/Wroclaw/Krakow
   curl pociag.info/Warszawa/Gdansk?n=5
   curl pociag.info/Krakow-Plaszow/Katowice
-  curl pociag.info/Wroclaw/Poznan/Gdansk
+  curl pociag.info/Opole/Poznan/Torun
 
 Opcje (łącz je przez &, np. ?n=5&lang=en):
   ?n=5       liczba pociągów, 1–20 (domyślnie 8)
@@ -63,7 +63,7 @@ Opcje (łącz je przez &, np. ?n=5&lang=en):
   pociag.info/Wroclaw/Krakow
   pociag.info/Warszawa/Gdansk?n=5
   pociag.info/Kielce/Lublin?lang=en
-  pociag.info/Wroclaw/Poznan/Gdansk
+  pociag.info/Opole/Poznan/Torun
 
 Opcje (łącz je przez &, np. ?n=5&lang=en):
   ?n=5       liczba pociągów, 1–20 (domyślnie 8)
@@ -85,13 +85,13 @@ Opcje (łącz je przez &, np. ?n=5&lang=en):
 		NeedTwoStations: "Give a start and a destination, e.g. curl pociag.info/Wroclaw/Krakow",
 		SameStation:     "Start and destination are the same station: %s.",
 		RepeatedStation: "%s appears more than once in the route.",
-		TooManyStations: "Give at most three via stations, e.g. curl pociag.info/Wroclaw/Poznan/Gdansk",
+		TooManyStations: "Give at most three via stations, e.g. curl pociag.info/Opole/Poznan/Torun",
 		Loading:         "Loading the timetable, try again in a moment.",
 		HelpTitle:       "pociag.info — check train timetables in your terminal and browser",
 		Help: `  curl pociag.info/Wroclaw/Krakow
   curl pociag.info/Warszawa/Gdansk?n=5
   curl pociag.info/Krakow-Plaszow/Katowice
-  curl pociag.info/Wroclaw/Poznan/Gdansk
+  curl pociag.info/Opole/Poznan/Torun
 
 Options (join them with &, e.g. ?n=5&lang=en):
   ?n=5       number of trains, 1–20 (default 8)
@@ -103,7 +103,7 @@ Options (join them with &, e.g. ?n=5&lang=en):
   pociag.info/Wroclaw/Krakow
   pociag.info/Warszawa/Gdansk?n=5
   pociag.info/Kielce/Lublin?lang=en
-  pociag.info/Wroclaw/Poznan/Gdansk
+  pociag.info/Opole/Poznan/Torun
 
 Options (join them with &, e.g. ?n=5&lang=pl):
   ?n=5       number of trains, 1–20 (default 8)

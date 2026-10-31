@@ -31,7 +31,7 @@ To change trains, add up to three via stations between the start and the
 destination:
 
 ```sh
-curl pociag.info/Wroclaw/Poznan/Gdansk
+curl pociag.info/Opole/Poznan/Torun
 curl 'pociag.info/Wroclaw/Poznan/Warszawa/Gdansk?change=15'
 ```
 
