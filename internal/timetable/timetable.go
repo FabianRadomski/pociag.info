@@ -98,23 +98,23 @@ func (t *Timetable) StationNames() map[string]string { return t.names }
 // Connections returns up to n direct rides from station `from` to station
 // `to` departing at or after `after`, ordered by departure.
 func (t *Timetable) Connections(from, to string, after time.Time, n int) []Connection {
-	out := t.candidates(from, to, after)
+	out := t.candidates(from, to, after, true, true)
 	return out[:min(max(n, 0), len(out))]
 }
 
 // candidates returns every ride from `from` to `to` scheduled to depart at
 // or after `since` within the search window, ordered by departure.
-func (t *Timetable) candidates(from, to string, since time.Time) []Connection {
+func (t *Timetable) candidates(from, to string, since time.Time, pickup, dropOff bool) []Connection {
 	first := gtfs.DateOf(since.In(warsaw)).AddDays(-t.daysBack)
 	days := t.daysBack + searchDays + 1
 
 	var out []Connection
 	for _, ref := range t.byStation[from] {
 		origin := ref.trip.StopTimes[ref.idx]
-		if origin.NoPickup || origin.Departure == gtfs.NoTime {
+		if pickup && origin.NoPickup || origin.Departure == gtfs.NoTime {
 			continue
 		}
-		dest, ok := t.alightingAt(ref.trip, ref.idx, to)
+		dest, ok := t.alightingAt(ref.trip, ref.idx, to, dropOff)
 		if !ok {
 			continue
 		}
@@ -136,10 +136,10 @@ func (t *Timetable) candidates(from, to string, since time.Time) []Connection {
 }
 
 // alightingAt finds the first stop after idx at station `to` where
-// passengers may get off.
-func (t *Timetable) alightingAt(trip *gtfs.Trip, idx int, to string) (gtfs.StopTime, bool) {
+// passengers may get off, or with dropOff false, where the train calls at all.
+func (t *Timetable) alightingAt(trip *gtfs.Trip, idx int, to string, dropOff bool) (gtfs.StopTime, bool) {
 	for _, st := range trip.StopTimes[idx+1:] {
-		if t.stationOf[st.StopID] == to && !st.NoDropOff && st.Arrival != gtfs.NoTime {
+		if t.stationOf[st.StopID] == to && (!dropOff || !st.NoDropOff) && st.Arrival != gtfs.NoTime {
 			return st, true
 		}
 	}

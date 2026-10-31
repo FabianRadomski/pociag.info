@@ -29,9 +29,11 @@ func (t *Timetable) Via(stops []string, now time.Time, n int, change time.Durati
 	if n <= 0 || len(stops) < 2 {
 		return nil
 	}
+	// Via stops may forbid boarding or alighting: such legs still serve a
+	// train ridden straight through, and catchable keeps changes off them.
 	segs := make([][]Connection, len(stops)-1)
 	for i := range segs {
-		for _, c := range t.candidates(stops[i], stops[i+1], now.Add(-maxDelay)) {
+		for _, c := range t.candidates(stops[i], stops[i+1], now.Add(-maxDelay), i == 0, i == len(segs)-1) {
 			c.merge(snap)
 			if c.Live == nil || !c.Live.Cancelled {
 				segs[i] = append(segs[i], c)
@@ -107,8 +109,9 @@ func catchable(seg []Connection, prev Connection, change time.Duration) []int {
 		return c.Leaves().Compare(t)
 	})
 	var out []int
+	canChange := !prev.dest.NoDropOff
 	for i, c := range seg {
-		if i >= start || same(c) {
+		if same(c) || canChange && i >= start && !c.origin.NoPickup {
 			out = append(out, i)
 		}
 	}

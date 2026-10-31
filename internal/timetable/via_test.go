@@ -197,3 +197,34 @@ func TestVia_LoopTrainOnlyContinuesForward(t *testing.T) {
 		t.Errorf("got %q, want [%q]", g, want)
 	}
 }
+
+// TestVia_ThroughRestrictedStop: a train stays one ride through a via stop
+// where it only sets down or only picks up, but nobody changes onto a train
+// they can't board there, and the last stop must still let you off.
+func TestVia_ThroughRestrictedStop(t *testing.T) {
+	feed := fstest.MapFS{
+		"agency.txt": viaFeed["agency.txt"],
+		"routes.txt": viaFeed["routes.txt"],
+		"stops.txt":  viaFeed["stops.txt"],
+		"trips.txt": {Data: []byte("trip_id,route_id,service_id,trip_headsign,plk_category_code,plk_train_number,plk_train_name\n" +
+			"AB,KD,S,Beta,KD,AB,\nSETDOWN,KD,S,Gamma,KD,SETDOWN,\nPICKUP,KD,S,Gamma,KD,PICKUP,\nNOEND,KD,S,Gamma,KD,NOEND,\n")},
+		"stop_times.txt": {Data: []byte("trip_id,stop_sequence,stop_id,arrival_time,departure_time,pickup_type,drop_off_type\n" +
+			"AB,0,A,08:00:00,08:00:00,0,0\nAB,1,B,09:00:00,09:00:00,0,0\n" +
+			"SETDOWN,0,A,09:00:00,09:00:00,0,0\nSETDOWN,1,B,10:00:00,10:00:00,1,0\nSETDOWN,2,C,11:00:00,11:00:00,0,0\n" +
+			"PICKUP,0,A,12:00:00,12:00:00,0,0\nPICKUP,1,B,13:00:00,13:00:00,0,1\nPICKUP,2,C,14:00:00,14:00:00,0,0\n" +
+			"NOEND,0,A,15:00:00,15:00:00,0,0\nNOEND,1,B,16:00:00,16:00:00,0,0\nNOEND,2,C,17:00:00,17:00:00,0,1\n")},
+		"calendar_dates.txt": viaFeed["calendar_dates.txt"],
+	}
+	got := newTimetable(t, feed).Via([]string{"A", "B", "C"}, at("2026-10-22", "00:00"), 10, 5*time.Minute, nil)
+	g := make([]string, len(got))
+	for i, j := range got {
+		g[i] = journeySummary(j)
+	}
+	want := []string{
+		"09:00 SETDOWN Alfa-Gamma 11:00",
+		"12:00 PICKUP Alfa-Gamma 14:00",
+	}
+	if strings.Join(g, "\n") != strings.Join(want, "\n") {
+		t.Errorf("journeys mismatch\n got:\n  %s\nwant:\n  %s", strings.Join(g, "\n  "), strings.Join(want, "\n  "))
+	}
+}

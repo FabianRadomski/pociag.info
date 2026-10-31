@@ -26,7 +26,7 @@ func (t *Timetable) Live(from, to string, now time.Time, n int, snap *realtime.S
 		return nil
 	}
 	var out []Connection
-	for _, c := range t.candidates(from, to, now.Add(-maxDelay)) {
+	for _, c := range t.candidates(from, to, now.Add(-maxDelay), true, true) {
 		c.merge(snap)
 		if c.Leaves().Before(now) {
 			continue
