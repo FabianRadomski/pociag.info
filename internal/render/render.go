@@ -234,25 +234,35 @@ func journeyRows(journeys []timetable.Journey, now time.Time, s Strings, narrow 
 		if narrow && len(rows) > 0 || i > 0 && (len(j.Legs) > 1 || len(journeys[i-1].Legs) > 1) {
 			rows = append(rows, row{})
 		}
+		// Journeys are ordered by departure, so heading each by the day it
+		// leaves keeps the separators going forwards. A later leg on another
+		// day is dated on its change line instead: a separator there would
+		// put the next journey, which may leave before midnight, under it.
+		legDay := day
 		for k, c := range j.Legs {
-			if k > 0 {
+			dep := c.Departure.In(warsaw)
+			if k == 0 {
+				if d := dateOf(dep); d != day {
+					day, legDay = d, d
+					sep := plain("── " + s.shortDate(dep) + " ──")
+					if narrow {
+						sep[0].style = styleDay
+					}
+					rows = append(rows, row{line: sep})
+				}
+			} else {
 				prev := j.Legs[k-1]
 				wait := int(max(c.Leaves().Sub(prev.Arrives()), 0).Round(time.Minute) / time.Minute)
-				change := row{line: cell{{fmt.Sprintf(s.ChangeAt, prev.To, wait), styleDim}}}
+				text := fmt.Sprintf(s.ChangeAt, prev.To, wait)
+				if d := dateOf(dep); d != legDay {
+					legDay = d
+					text += " · " + s.shortDate(dep)
+				}
+				change := row{line: cell{{text, styleDim}}}
 				if !narrow {
 					change.lineCol = 1
 				}
 				rows = append(rows, change)
-			}
-			// Every leg is dated, so a change after midnight gets its separator.
-			dep := c.Departure.In(warsaw)
-			if d := dateOf(dep); d != day {
-				day = d
-				sep := plain("── " + s.shortDate(dep) + " ──")
-				if narrow {
-					sep[0].style = styleDay
-				}
-				rows = append(rows, row{line: sep})
 			}
 			rows = append(rows, legRows(c, s, narrow)...)
 		}

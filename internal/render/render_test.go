@@ -401,10 +401,37 @@ func TestText_ViaChangeAfterMidnight(t *testing.T) {
 	leg.Departure, leg.Arrival = at("2026-10-23 00:15:00"), at("2026-10-23 02:40:00")
 	got := text(t, b, false)
 
-	if !strings.Contains(got, "change in Poznań Główny, 73 min\n── Friday, 23.10 ──\n00:15 ") {
-		t.Errorf("no day separator before the leg leaving after midnight:\n%s", got)
+	if !strings.Contains(got, "change in Poznań Główny, 73 min · Friday, 23.10\n00:15 ") {
+		t.Errorf("leg leaving after midnight not dated on its change line:\n%s", got)
 	}
 	if n := strings.Count(got, "── Friday, 23.10 ──"); n != 1 {
 		t.Errorf("day separator shown %d times, want 1:\n%s", n, got)
+	}
+}
+
+// TestText_ViaDaySeparatorsOnlyGoForward: journeys are ordered by departure,
+// so a change after midnight in one journey must not put the next journey,
+// which leaves before midnight, under the next day's heading. The later leg
+// is dated on its change line instead.
+func TestText_ViaDaySeparatorsOnlyGoForward(t *testing.T) {
+	b := viaBoard()
+	j1 := b.Journeys[0]
+	j1.Legs[1].Departure, j1.Legs[1].Arrival = at("2026-10-23 00:30:00"), at("2026-10-23 02:40:00")
+	j2 := timetable.Journey{Legs: []timetable.Connection{{
+		Category: "IC", Number: "6100", Departure: at("2026-10-22 22:30:00"), Arrival: at("2026-10-22 23:50:00"),
+		Destination: "Gdańsk Główny", From: "Wrocław Główny", To: "Gdańsk Główny",
+	}}}
+	b.Journeys = []timetable.Journey{j1, j2, b.Journeys[1]}
+	got := text(t, b, false)
+
+	if !strings.Contains(got, "change in Poznań Główny, 88 min · Friday, 23.10\n00:30 ") {
+		t.Errorf("leg after midnight not dated on its change line:\n%s", got)
+	}
+	seps := regexp.MustCompile(`(?m)^── .* ──$`).FindAllString(got, -1)
+	if strings.Join(seps, "|") != "── Friday, 23.10 ──" {
+		t.Errorf("day separators %q, want only Friday:\n%s", seps, got)
+	}
+	if !strings.Contains(got, "── Friday, 23.10 ──\n05:00 ") {
+		t.Errorf("Friday separator not before the first journey leaving on Friday:\n%s", got)
 	}
 }
