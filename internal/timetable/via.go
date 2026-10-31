@@ -1,9 +1,11 @@
 package timetable
 
 import (
+	"cmp"
 	"slices"
 	"time"
 
+	"pociag.info/internal/gtfs"
 	"pociag.info/internal/realtime"
 )
 
@@ -31,7 +33,7 @@ func (t *Timetable) Via(stops []string, now time.Time, n int, change time.Durati
 		return nil
 	}
 	// Via stops may forbid boarding or alighting: such legs still serve a
-	// train ridden straight through, and catchable keeps changes off them.
+	// train ridden straight through, and plan keeps changes off them.
 	segs := make([][]Connection, len(stops)-1)
 	for i := range segs {
 		for _, c := range t.candidates(stops[i], stops[i+1], now.Add(-maxDelay), i == 0, i == len(segs)-1) {
@@ -44,17 +46,17 @@ func (t *Timetable) Via(stops []string, now time.Time, n int, change time.Durati
 	}
 
 	var all []Journey
-	memo := make([][]*rest, len(segs))
-	for i, seg := range segs {
-		memo[i] = make([]*rest, len(seg))
-	}
-	for _, first := range segs[0] {
-		if first.Leaves().Before(now) {
+	ends := plan(segs, change)
+	for j, first := range segs[0] {
+		if first.Leaves().Before(now) || !ends[0][j].ok {
 			continue
 		}
-		if r := follow(segs[1:], memo[1:], first, change); r.ok {
-			all = append(all, Journey{t.joinThrough(append([]Connection{first}, r.legs...), snap)})
+		legs := []Connection{first}
+		for i, k := 1, ends[0][j].next; k >= 0; i++ {
+			legs = append(legs, segs[i][k])
+			k = ends[i][k].next
 		}
+		all = append(all, Journey{t.joinThrough(legs, snap)})
 	}
 
 	// Among journeys leaving at the same time the earliest arrival comes
@@ -79,73 +81,126 @@ func (t *Timetable) Via(stops []string, now time.Time, n int, change time.Durati
 	return out[:min(n, len(out))]
 }
 
-// rest is the best way to finish a journey: the legs after a given one and
-// when the last of them arrives.
-type rest struct {
-	legs    []Connection
+// end is the best way to finish a journey from a leg: the index of the leg
+// to take in the next segment (-1 after the last one) and when the last stop
+// is reached.
+type end struct {
+	next    int
 	arrives time.Time
 	ok      bool
 }
 
-// follow finishes a journey from prev through segs, taking at each segment
-// the leg that reaches the last stop earliest, not the one reaching the next
-// stop earliest: a later train may run on through it and save a change.
-// Among equally good legs the most preferred one (see catchable) wins.
-// memo[i][j] caches the best way on from segs[i][j], which doesn't depend on
-// how the journey got there.
-func follow(segs [][]Connection, memo [][]*rest, prev Connection, change time.Duration) rest {
-	if len(segs) == 0 {
-		return rest{arrives: prev.Arrives(), ok: true}
+// plan finds, for every leg of every segment, the way on that reaches the
+// last stop earliest, not the one reaching the next stop earliest: a later
+// train may run on through it and save a change. Each segment must be
+// sorted by Leaves. It works from the last segment back, so the best way on
+// from each leg of the next segment is already known; a suffix minimum over
+// that segment then gives the best train to change onto from any time, and
+// the same train is looked up by trip. O(M log M) for M legs per segment.
+func plan(segs [][]Connection, change time.Duration) [][]end {
+	ends := make([][]end, len(segs))
+	last := len(segs) - 1
+	ends[last] = make([]end, len(segs[last]))
+	for j, c := range segs[last] {
+		ends[last][j] = end{next: -1, arrives: c.Arrives(), ok: true}
 	}
-	var best rest
-	for _, j := range catchable(segs[0], prev, change) {
-		if memo[0][j] == nil {
-			r := follow(segs[1:], memo[1:], segs[0][j], change)
-			if r.ok {
-				r.legs = append([]Connection{segs[0][j]}, r.legs...)
+	for i := last - 1; i >= 0; i-- {
+		next, nextEnds := segs[i+1], ends[i+1]
+		wayAt := func(k int) way {
+			return way{idx: k, final: nextEnds[k].arrives, next: next[k].Arrives()}
+		}
+		// suf[k] is the best leg at index k or later to change onto, or -1.
+		suf := make([]int, len(next)+1)
+		suf[len(next)] = -1
+		for k := len(next) - 1; k >= 0; k-- {
+			suf[k] = suf[k+1]
+			if !next[k].origin.NoPickup && nextEnds[k].ok && (suf[k] < 0 || wayAt(k).compare(wayAt(suf[k])) < 0) {
+				suf[k] = k
 			}
-			memo[0][j] = &r
 		}
-		if r := *memo[0][j]; r.ok && (!best.ok || r.arrives.Before(best.arrives)) {
-			best = r
+		// A train calling at a station twice gives a leg from each call, so
+		// a train may have more than one leg here.
+		byTrain := map[trainKey][]int{}
+		for k, c := range next {
+			if nextEnds[k].ok {
+				key := trainKey{c.TripID, c.ServiceDate}
+				byTrain[key] = append(byTrain[key], k)
+			}
+		}
+
+		ends[i] = make([]end, len(segs[i]))
+		for j, prev := range segs[i] {
+			// Staying on: the same train from where prev gets off or later,
+			// not back in time. It ignores pickup and drop-off rules.
+			same := func(c Connection) bool {
+				return c.TripID == prev.TripID && c.ServiceDate == prev.ServiceDate && c.origin.Sequence >= prev.dest.Sequence
+			}
+			var best way
+			found := false
+			consider := func(w way) {
+				if !found || w.compare(best) < 0 {
+					best, found = w, true
+				}
+			}
+			if !prev.dest.NoDropOff {
+				start, _ := slices.BinarySearchFunc(next, prev.Arrives().Add(change), func(c Connection, t time.Time) int {
+					return c.Leaves().Compare(t)
+				})
+				if k := suf[start]; k >= 0 {
+					w := wayAt(k)
+					w.same = same(next[k])
+					consider(w)
+				}
+			}
+			for _, k := range byTrain[trainKey{prev.TripID, prev.ServiceDate}] {
+				if same(next[k]) {
+					w := wayAt(k)
+					w.same = true
+					consider(w)
+				}
+			}
+			if found {
+				ends[i][j] = end{next: best.idx, arrives: best.final, ok: true}
+			}
 		}
 	}
-	return best
+	return ends
 }
 
-// catchable returns the indices of the legs of seg, which is sorted by
-// Leaves, catchable after prev: the same train further along its run, or one
-// leaving at least `change` after prev arrives. They come earliest arrival
-// first; ties go to the same train, then to the later departure.
-func catchable(seg []Connection, prev Connection, change time.Duration) []int {
-	// A train calling at a station twice gives a leg from each call; only
-	// one from where prev gets off or later goes on, not back in time.
-	same := func(c Connection) bool {
-		return c.TripID == prev.TripID && c.ServiceDate == prev.ServiceDate && c.origin.Sequence >= prev.dest.Sequence
+type trainKey struct {
+	trip string
+	date gtfs.Date
+}
+
+// way is a leg of a segment considered as the next one to ride.
+type way struct {
+	idx   int       // into the segment, which is sorted by Leaves
+	final time.Time // when the journey reaches the last stop taking it
+	next  time.Time // when it reaches the next stop
+	same  bool      // it is the train the traveller is already on
+}
+
+// compare orders ways on, best first: the earliest arrival at the last
+// stop, then at the next stop, then staying on the same train, then the
+// later departure.
+func (a way) compare(b way) int {
+	return cmp.Or(
+		a.final.Compare(b.final),
+		a.next.Compare(b.next),
+		boolFirst(a.same, b.same),
+		cmp.Compare(b.idx, a.idx),
+	)
+}
+
+// boolFirst orders true before false.
+func boolFirst(a, b bool) int {
+	switch {
+	case a == b:
+		return 0
+	case a:
+		return -1
 	}
-	start, _ := slices.BinarySearchFunc(seg, prev.Arrives().Add(change), func(c Connection, t time.Time) int {
-		return c.Leaves().Compare(t)
-	})
-	var out []int
-	canChange := !prev.dest.NoDropOff
-	for i, c := range seg {
-		if same(c) || canChange && i >= start && !c.origin.NoPickup {
-			out = append(out, i)
-		}
-	}
-	slices.SortStableFunc(out, func(a, b int) int {
-		if c := seg[a].Arrives().Compare(seg[b].Arrives()); c != 0 {
-			return c
-		}
-		if sa, sb := same(seg[a]), same(seg[b]); sa != sb {
-			if sa {
-				return -1
-			}
-			return 1
-		}
-		return b - a // later departure first
-	})
-	return out
+	return 1
 }
 
 // joinThrough merges consecutive legs on the same train into one.

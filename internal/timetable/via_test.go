@@ -292,3 +292,26 @@ func TestVia_OrderedByScheduledDeparture(t *testing.T) {
 		t.Errorf("journeys mismatch\n got:\n  %s\nwant:\n  %s", strings.Join(g, "\n  "), strings.Join(want, "\n  "))
 	}
 }
+
+// TestWayCompare pins the order in which ways on from a leg are preferred.
+func TestWayCompare(t *testing.T) {
+	t9, t10, t11 := at("2026-10-22", "09:00"), at("2026-10-22", "10:00"), at("2026-10-22", "11:00")
+	tests := []struct {
+		name string
+		a, b way
+	}{
+		{"earlier final arrival wins over earlier next stop",
+			way{idx: 0, final: t10, next: t10}, way{idx: 1, final: t11, next: t9}},
+		{"earlier next stop wins over staying on",
+			way{idx: 0, final: t11, next: t9}, way{idx: 1, final: t11, next: t10, same: true}},
+		{"staying on wins over a later departure",
+			way{idx: 0, final: t11, next: t10, same: true}, way{idx: 1, final: t11, next: t10}},
+		{"later departure wins otherwise",
+			way{idx: 1, final: t11, next: t10}, way{idx: 0, final: t11, next: t10}},
+	}
+	for _, tc := range tests {
+		if tc.a.compare(tc.b) >= 0 || tc.b.compare(tc.a) <= 0 {
+			t.Errorf("%s: a.compare(b) = %d, b.compare(a) = %d", tc.name, tc.a.compare(tc.b), tc.b.compare(tc.a))
+		}
+	}
+}
