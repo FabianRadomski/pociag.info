@@ -228,3 +228,31 @@ func TestVia_ThroughRestrictedStop(t *testing.T) {
 		t.Errorf("journeys mismatch\n got:\n  %s\nwant:\n  %s", strings.Join(g, "\n  "), strings.Join(want, "\n  "))
 	}
 }
+
+// TestVia_LaterTrainRunsOnThrough: the first Beta-Gamma train reaches Gamma
+// sooner, but a slightly later one runs on to Delta without a change and
+// gets there first.
+func TestVia_LaterTrainRunsOnThrough(t *testing.T) {
+	feed := fstest.MapFS{
+		"agency.txt": viaFeed["agency.txt"],
+		"routes.txt": viaFeed["routes.txt"],
+		"stops.txt":  viaFeed["stops.txt"],
+		"trips.txt": {Data: []byte("trip_id,route_id,service_id,trip_headsign,plk_category_code,plk_train_number,plk_train_name\n" +
+			"AB,KD,S,Beta,KD,AB,\nP,KD,S,Gamma,KD,P,\nQ,KD,S,Delta,KD,Q,\nCD,KD,S,Delta,KD,CD,\n")},
+		"stop_times.txt": {Data: []byte("trip_id,stop_sequence,stop_id,arrival_time,departure_time\n" +
+			"AB,0,A,08:00:00,08:00:00\nAB,1,B,09:00:00,09:00:00\n" +
+			"P,0,B,09:10:00,09:10:00\nP,1,C,10:00:00,10:00:00\n" +
+			"Q,0,B,09:15:00,09:15:00\nQ,1,C,10:02:00,10:03:00\nQ,2,D,10:30:00,10:30:00\n" +
+			"CD,0,C,10:10:00,10:10:00\nCD,1,D,11:00:00,11:00:00\n")},
+		"calendar_dates.txt": viaFeed["calendar_dates.txt"],
+	}
+	got := newTimetable(t, feed).Via([]string{"A", "B", "C", "D"}, at("2026-10-22", "00:00"), 10, 5*time.Minute, nil)
+	want := "08:00 AB Alfa-Beta 09:00 | 09:15 Q Beta-Delta 10:30"
+	if len(got) != 1 || journeySummary(got[0]) != want {
+		g := make([]string, len(got))
+		for i, j := range got {
+			g[i] = journeySummary(j)
+		}
+		t.Errorf("got %q, want [%q]", g, want)
+	}
+}

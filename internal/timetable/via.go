@@ -21,8 +21,9 @@ func (j Journey) Arrives() time.Time { return j.Legs[len(j.Legs)-1].Arrives() }
 // Via returns up to n journeys from stops[0] to the last stop that pass
 // through the stations in between, in order, ordered by departure. Each leg
 // between consecutive stops is a direct train; at each stop the journey
-// continues on the train that arrives earliest among those leaving at least
-// `change` later. A train running through a stop stays one leg. Journeys
+// continues on a train leaving at least `change` later, picked so that the
+// whole journey arrives earliest. A train running through a stop stays one
+// leg. Journeys
 // beaten by one that leaves later and arrives no later are dropped. Times
 // are live estimates where snap has them; snap may be nil.
 func (t *Timetable) Via(stops []string, now time.Time, n int, change time.Duration, snap *realtime.Snapshot) []Journey {
@@ -43,16 +44,16 @@ func (t *Timetable) Via(stops []string, now time.Time, n int, change time.Durati
 	}
 
 	var all []Journey
-	dead := make([][]bool, len(segs))
+	memo := make([][]*rest, len(segs))
 	for i, seg := range segs {
-		dead[i] = make([]bool, len(seg))
+		memo[i] = make([]*rest, len(seg))
 	}
 	for _, first := range segs[0] {
 		if first.Leaves().Before(now) {
 			continue
 		}
-		if rest, ok := follow(segs[1:], dead[1:], first, change); ok {
-			all = append(all, Journey{t.joinThrough(append([]Connection{first}, rest...), snap)})
+		if r := follow(segs[1:], memo[1:], first, change); r.ok {
+			all = append(all, Journey{t.joinThrough(append([]Connection{first}, r.legs...), snap)})
 		}
 	}
 
@@ -75,24 +76,38 @@ func (t *Timetable) Via(stops []string, now time.Time, n int, change time.Durati
 	return out[:min(n, len(out))]
 }
 
-// follow continues a journey from prev through segs, taking at each segment
-// the most preferred leg (see catchable) from which the rest can still be
-// completed, so a dead end further on falls back to the next choice instead
-// of losing the journey. dead[i][j] remembers that segs[i][j] leads nowhere.
-func follow(segs [][]Connection, dead [][]bool, prev Connection, change time.Duration) ([]Connection, bool) {
+// rest is the best way to finish a journey: the legs after a given one and
+// when the last of them arrives.
+type rest struct {
+	legs    []Connection
+	arrives time.Time
+	ok      bool
+}
+
+// follow finishes a journey from prev through segs, taking at each segment
+// the leg that reaches the last stop earliest, not the one reaching the next
+// stop earliest: a later train may run on through it and save a change.
+// Among equally good legs the most preferred one (see catchable) wins.
+// memo[i][j] caches the best way on from segs[i][j], which doesn't depend on
+// how the journey got there.
+func follow(segs [][]Connection, memo [][]*rest, prev Connection, change time.Duration) rest {
 	if len(segs) == 0 {
-		return nil, true
+		return rest{arrives: prev.Arrives(), ok: true}
 	}
+	var best rest
 	for _, j := range catchable(segs[0], prev, change) {
-		if dead[0][j] {
-			continue
+		if memo[0][j] == nil {
+			r := follow(segs[1:], memo[1:], segs[0][j], change)
+			if r.ok {
+				r.legs = append([]Connection{segs[0][j]}, r.legs...)
+			}
+			memo[0][j] = &r
 		}
-		if rest, ok := follow(segs[1:], dead[1:], segs[0][j], change); ok {
-			return append([]Connection{segs[0][j]}, rest...), true
+		if r := *memo[0][j]; r.ok && (!best.ok || r.arrives.Before(best.arrives)) {
+			best = r
 		}
-		dead[0][j] = true
 	}
-	return nil, false
+	return best
 }
 
 // catchable returns the indices of the legs of seg, which is sorted by
