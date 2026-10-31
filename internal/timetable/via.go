@@ -35,14 +35,19 @@ func (t *Timetable) Via(stops []string, now time.Time, n int, change time.Durati
 	// Via stops may forbid boarding or alighting: such legs still serve a
 	// train ridden straight through, and plan keeps changes off them.
 	//
-	// A leg on the last service day searched may arrive daysBack days later
-	// (times past 24:00), and the next train may leave the day after, so
-	// each segment looks daysBack+1 service days further than the one
-	// before it.
+	// Legs near the end of the window arrive after it, so each later
+	// segment also looks past the window, for trains leaving up to the end
+	// of the day after the previous segment's last arrival.
 	segs := make([][]Connection, len(stops)-1)
+	var until time.Time
 	for i := range segs {
-		extra := i * (t.daysBack + 1)
-		for _, c := range t.candidates(stops[i], stops[i+1], now.Add(-maxDelay), extra, i == 0, i == len(segs)-1) {
+		if i > 0 {
+			if len(segs[i-1]) == 0 {
+				return nil
+			}
+			until = dayAfter(segs[i-1])
+		}
+		for _, c := range t.candidates(stops[i], stops[i+1], now.Add(-maxDelay), until, i == 0, i == len(segs)-1) {
 			if mergeVia(&c, snap, i == 0, i == len(segs)-1) {
 				segs[i] = append(segs[i], c)
 			}
@@ -84,6 +89,21 @@ func (t *Timetable) Via(stops []string, now time.Time, n int, change time.Durati
 	// train keeps its place under its own day's heading.
 	slices.SortStableFunc(out, func(a, b Journey) int { return a.Legs[0].Departure.Compare(b.Legs[0].Departure) })
 	return out[:min(n, len(out))]
+}
+
+// dayAfter is midnight at the end of the day after the last of legs
+// arrives, scheduled or live.
+func dayAfter(legs []Connection) time.Time {
+	var last time.Time
+	for _, c := range legs {
+		for _, a := range []time.Time{c.Arrival, c.Arrives()} {
+			if a.After(last) {
+				last = a
+			}
+		}
+	}
+	y, m, d := last.In(warsaw).Date()
+	return time.Date(y, m, d+2, 0, 0, 0, 0, warsaw)
 }
 
 // mergeVia attaches realtime data to a leg of a via journey and reports
