@@ -171,3 +171,29 @@ func TestVia_FallsBackWhenLaterLegFails(t *testing.T) {
 		t.Errorf("got %q, want [%q]", g, want)
 	}
 }
+
+// TestVia_LoopTrainOnlyContinuesForward: a loop train calls at Beta twice;
+// boarded at Alfa it reaches Beta on its second call, so it can't continue
+// from the first, which it left before reaching Alfa.
+func TestVia_LoopTrainOnlyContinuesForward(t *testing.T) {
+	feed := fstest.MapFS{
+		"agency.txt": viaFeed["agency.txt"],
+		"routes.txt": viaFeed["routes.txt"],
+		"stops.txt":  viaFeed["stops.txt"],
+		"trips.txt": {Data: []byte("trip_id,route_id,service_id,trip_headsign,plk_category_code,plk_train_number,plk_train_name\n" +
+			"LOOP,KD,S,Gamma,KD,LOOP,\n")},
+		"stop_times.txt": {Data: []byte("trip_id,stop_sequence,stop_id,arrival_time,departure_time\n" +
+			"LOOP,0,B,10:00:00,10:00:00\nLOOP,1,C,10:30:00,10:30:00\nLOOP,2,A,11:00:00,11:00:00\n" +
+			"LOOP,3,B,11:30:00,11:30:00\nLOOP,4,C,12:00:00,12:00:00\n")},
+		"calendar_dates.txt": viaFeed["calendar_dates.txt"],
+	}
+	got := newTimetable(t, feed).Via([]string{"A", "B", "C"}, at("2026-10-22", "00:00"), 10, 5*time.Minute, nil)
+	want := "11:00 LOOP Alfa-Gamma 12:00"
+	if len(got) != 1 || journeySummary(got[0]) != want {
+		g := make([]string, len(got))
+		for i, j := range got {
+			g[i] = journeySummary(j)
+		}
+		t.Errorf("got %q, want [%q]", g, want)
+	}
+}

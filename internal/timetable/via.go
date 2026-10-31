@@ -94,11 +94,15 @@ func follow(segs [][]Connection, dead [][]bool, prev Connection, change time.Dur
 }
 
 // catchable returns the indices of the legs of seg, which is sorted by
-// Leaves, catchable after prev: the same train, or one leaving at least
-// `change` after prev arrives. They come earliest arrival first; ties go to
-// the same train, then to the later departure.
+// Leaves, catchable after prev: the same train further along its run, or one
+// leaving at least `change` after prev arrives. They come earliest arrival
+// first; ties go to the same train, then to the later departure.
 func catchable(seg []Connection, prev Connection, change time.Duration) []int {
-	same := func(c Connection) bool { return c.TripID == prev.TripID && c.ServiceDate == prev.ServiceDate }
+	// A train calling at a station twice gives a leg from each call; only
+	// one from where prev gets off or later goes on, not back in time.
+	same := func(c Connection) bool {
+		return c.TripID == prev.TripID && c.ServiceDate == prev.ServiceDate && c.origin.Sequence >= prev.dest.Sequence
+	}
 	start, _ := slices.BinarySearchFunc(seg, prev.Arrives().Add(change), func(c Connection, t time.Time) int {
 		return c.Leaves().Compare(t)
 	})
