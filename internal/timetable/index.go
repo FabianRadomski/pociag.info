@@ -60,8 +60,10 @@ const extraDays = 2
 
 // index returns the index for snap at now, building it if needed. A
 // snapshot older than the one indexed is served from the newer index rather
-// than rebuilding for it.
+// than rebuilding for it. A snapshot that doesn't fit the timetable is
+// indexed as nil, as callers that check it first pass it.
 func (t *Timetable) index(snap *realtime.Snapshot, now time.Time) *index {
+	snap = t.Match(snap)
 	start := now.Add(-maxDelay).Truncate(time.Hour)
 	t.mu.Lock()
 	defer t.mu.Unlock()
