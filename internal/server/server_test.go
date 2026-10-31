@@ -100,6 +100,7 @@ func TestBoard_CurlGetsColouredText(t *testing.T) {
 		t.Fatalf("status %d, content-type %q", r.status, r.contentType)
 	}
 	mustContain(t, r.body,
+		"(@)=(@)",
 		"Wrocław Główny → Kraków Główny",
 		"IC 73004/5 ODRA", // first train still to leave at 20:27, predicted +4
 		"\x1b[",
@@ -123,7 +124,7 @@ func TestBoard_BrowserGetsHTML(t *testing.T) {
 	if r.status != http.StatusOK || r.contentType != "text/html; charset=utf-8" {
 		t.Fatalf("status %d, content-type %q", r.status, r.contentType)
 	}
-	mustContain(t, r.body, "<!doctype html>", "<pre>", "IC 73004/5 ODRA")
+	mustContain(t, r.body, "<!doctype html>", `<pre class="wide">`, `<pre class="narrow">`, "IC 73004/5 ODRA")
 }
 
 func TestBoard_Language(t *testing.T) {
@@ -208,10 +209,10 @@ func TestHelp(t *testing.T) {
 		if r.status != http.StatusOK {
 			t.Errorf("%s: status %d", path, r.status)
 		}
-		mustContain(t, r.body, "curl pociag.info/Wroclaw/Krakow", "?lang=en")
+		mustContain(t, r.body, "(@)=(@)", "curl pociag.info/Wroclaw/Krakow", "?lang=en")
 	}
-	mustContain(t, get(t, s, "/?lang=en").body, "the next trains")
-	mustContain(t, get(t, s, "/", "User-Agent", browserUA).body, "<!doctype html>", "curl pociag.info/Wroclaw/Krakow")
+	mustContain(t, get(t, s, "/?lang=en").body, "check train timetables")
+	mustContain(t, get(t, s, "/", "User-Agent", browserUA).body, "<!doctype html>", "pociag.info/Wroclaw/Krakow")
 }
 
 func TestFavicon(t *testing.T) {
