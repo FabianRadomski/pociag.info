@@ -145,3 +145,29 @@ func TestVia_LimitsCount(t *testing.T) {
 		t.Errorf("got %d journeys starting %v, want 2 starting AB0800", len(got), got)
 	}
 }
+
+// TestVia_FallsBackWhenLaterLegFails: the fastest Beta-Gamma train strands
+// the traveller at Gamma, but a slower one runs on through to Delta.
+func TestVia_FallsBackWhenLaterLegFails(t *testing.T) {
+	feed := fstest.MapFS{
+		"agency.txt": viaFeed["agency.txt"],
+		"routes.txt": viaFeed["routes.txt"],
+		"stops.txt":  viaFeed["stops.txt"],
+		"trips.txt": {Data: []byte("trip_id,route_id,service_id,trip_headsign,plk_category_code,plk_train_number,plk_train_name\n" +
+			"AB,KD,S,Beta,KD,AB,\nFAST,KD,S,Gamma,KD,FAST,\nSLOW,KD,S,Delta,KD,SLOW,\n")},
+		"stop_times.txt": {Data: []byte("trip_id,stop_sequence,stop_id,arrival_time,departure_time\n" +
+			"AB,0,A,08:00:00,08:00:00\nAB,1,B,09:00:00,09:00:00\n" +
+			"FAST,0,B,09:10:00,09:10:00\nFAST,1,C,09:58:00,09:58:00\n" +
+			"SLOW,0,B,09:15:00,09:15:00\nSLOW,1,C,10:00:00,10:01:00\nSLOW,2,D,11:00:00,11:00:00\n")},
+		"calendar_dates.txt": viaFeed["calendar_dates.txt"],
+	}
+	got := newTimetable(t, feed).Via([]string{"A", "B", "C", "D"}, at("2026-10-22", "00:00"), 10, 5*time.Minute, nil)
+	want := "08:00 AB Alfa-Beta 09:00 | 09:15 SLOW Beta-Delta 11:00"
+	if len(got) != 1 || journeySummary(got[0]) != want {
+		g := make([]string, len(got))
+		for i, j := range got {
+			g[i] = journeySummary(j)
+		}
+		t.Errorf("got %q, want [%q]", g, want)
+	}
+}

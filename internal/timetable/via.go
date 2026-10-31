@@ -41,20 +41,17 @@ func (t *Timetable) Via(stops []string, now time.Time, n int, change time.Durati
 	}
 
 	var all []Journey
-next:
+	dead := make([][]bool, len(segs))
+	for i, seg := range segs {
+		dead[i] = make([]bool, len(seg))
+	}
 	for _, first := range segs[0] {
 		if first.Leaves().Before(now) {
 			continue
 		}
-		legs := []Connection{first}
-		for _, seg := range segs[1:] {
-			leg, ok := nextLeg(seg, legs[len(legs)-1], change)
-			if !ok {
-				continue next
-			}
-			legs = append(legs, leg)
+		if rest, ok := follow(segs[1:], dead[1:], first, change); ok {
+			all = append(all, Journey{t.joinThrough(append([]Connection{first}, rest...), snap)})
 		}
-		all = append(all, Journey{t.joinThrough(legs, snap)})
 	}
 
 	// Among journeys leaving at the same time the earliest arrival comes
@@ -76,33 +73,54 @@ next:
 	return out[:min(n, len(out))]
 }
 
-// nextLeg picks the leg of seg, which is sorted by Leaves, that arrives
-// earliest among those catchable after prev: the same train, or one leaving
-// at least `change` after prev arrives. Ties go to the same train, then to
-// the later departure.
-func nextLeg(seg []Connection, prev Connection, change time.Duration) (Connection, bool) {
-	var best Connection
-	found, same := false, false
-	if i := slices.IndexFunc(seg, func(c Connection) bool {
-		return c.TripID == prev.TripID && c.ServiceDate == prev.ServiceDate
-	}); i >= 0 {
-		best, found, same = seg[i], true, true
+// follow continues a journey from prev through segs, taking at each segment
+// the most preferred leg (see catchable) from which the rest can still be
+// completed, so a dead end further on falls back to the next choice instead
+// of losing the journey. dead[i][j] remembers that segs[i][j] leads nowhere.
+func follow(segs [][]Connection, dead [][]bool, prev Connection, change time.Duration) ([]Connection, bool) {
+	if len(segs) == 0 {
+		return nil, true
 	}
+	for _, j := range catchable(segs[0], prev, change) {
+		if dead[0][j] {
+			continue
+		}
+		if rest, ok := follow(segs[1:], dead[1:], segs[0][j], change); ok {
+			return append([]Connection{segs[0][j]}, rest...), true
+		}
+		dead[0][j] = true
+	}
+	return nil, false
+}
+
+// catchable returns the indices of the legs of seg, which is sorted by
+// Leaves, catchable after prev: the same train, or one leaving at least
+// `change` after prev arrives. They come earliest arrival first; ties go to
+// the same train, then to the later departure.
+func catchable(seg []Connection, prev Connection, change time.Duration) []int {
+	same := func(c Connection) bool { return c.TripID == prev.TripID && c.ServiceDate == prev.ServiceDate }
 	start, _ := slices.BinarySearchFunc(seg, prev.Arrives().Add(change), func(c Connection, t time.Time) int {
 		return c.Leaves().Compare(t)
 	})
-	for _, c := range seg[start:] {
-		if found && c.Leaves().After(best.Arrives()) {
-			break // can't arrive any earlier
-		}
-		switch {
-		case !found || c.Arrives().Before(best.Arrives()):
-			best, found, same = c, true, false
-		case c.Arrives().Equal(best.Arrives()) && !same:
-			best = c
+	var out []int
+	for i, c := range seg {
+		if i >= start || same(c) {
+			out = append(out, i)
 		}
 	}
-	return best, found
+	slices.SortStableFunc(out, func(a, b int) int {
+		if c := seg[a].Arrives().Compare(seg[b].Arrives()); c != 0 {
+			return c
+		}
+		if sa, sb := same(seg[a]), same(seg[b]); sa != sb {
+			if sa {
+				return -1
+			}
+			return 1
+		}
+		return b - a // later departure first
+	})
+	return out
 }
 
 // joinThrough merges consecutive legs on the same train into one.
