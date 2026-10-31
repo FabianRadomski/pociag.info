@@ -76,30 +76,86 @@ var train string
 // from a terminal or, for HTML, from a browser.
 func Help(w io.Writer, f Format, lang Lang) error {
 	s := For(lang)
-	usage := style(f, "", s.Help)
 	if f == FormatHTML {
-		usage = exampleURL.ReplaceAllString(style(f, "", s.HelpWeb), `<a href="${1}">${0}</a>`)
+		link := func(text string) string {
+			return exampleURL.ReplaceAllString(style(f, "", text), `<a href="${1}">${0}</a>`)
+		}
+		return htmlNotice(w, lang, s.HelpTitle, link(s.HelpWeb), link(option.ReplaceAllString(s.HelpWeb, "$1$2\n$1  $3")))
 	}
-	return notice(w, f, lang, style(f, "", train)+"\n"+style(f, styleBold, s.HelpTitle)+"\n\n"+usage)
+	_, err := io.WriteString(w, style(f, "", train)+"\n"+style(f, styleBold, s.HelpTitle)+"\n\n"+style(f, "", s.Help)+footer(f, lang))
+	return err
 }
 
 // exampleURL matches the example addresses in the browser help, capturing the
 // path so they can be linked.
 var exampleURL = regexp.MustCompile(`pociag\.info(/\S+)`)
 
+// option matches a line of the options list: its indent, the option, and
+// what it does, which the narrow layout moves under the option.
+var option = regexp.MustCompile(`(?m)^( +)(\?\S+) +(.*)$`)
+
 // Notice writes a short message, such as an error, with the credits footer.
 func Notice(w io.Writer, f Format, lang Lang, msg string) error {
-	return notice(w, f, lang, style(f, "", msg))
+	if f == FormatHTML {
+		return htmlNotice(w, lang, "", style(f, "", msg), style(f, "", msg))
+	}
+	_, err := io.WriteString(w, style(f, "", msg)+footer(f, lang))
+	return err
 }
 
-// notice writes an already styled body with the credits footer.
-func notice(w io.Writer, f Format, lang Lang, body string) error {
-	body += "\n\n" + style(f, styleDim, For(lang).Credits) + "\n"
-	if f == FormatHTML {
-		return page(w, lang, "pociag.info", "<pre>"+body+"</pre>")
+// footer is the credits, a blank line below the text.
+func footer(f Format, lang Lang) string {
+	return "\n\n" + style(f, styleDim, For(lang).Credits) + "\n"
+}
+
+// htmlNotice writes a page with an already styled body and the credits,
+// under the train and a title if there is one. Like the board, it holds the
+// text twice: as in the terminal, and for small screens with the train and
+// title centred and every line a block of its own, so that a line too long
+// for the screen wraps and stays at its indent.
+func htmlNotice(w io.Writer, lang Lang, title, wide, narrow string) error {
+	f := FormatHTML
+	credits := style(f, styleDim, For(lang).Credits)
+	var top, narrowTop string
+	if title != "" {
+		t, b := style(f, "", train), style(f, styleBold, title)
+		top = t + "\n" + b + "\n\n"
+		narrowTop = `<span class="train">` + strings.TrimSuffix(t, "\n") + "</span>" + lines("") +
+			`<span class="ln head">` + b + "</span>" + lines("")
 	}
-	_, err := io.WriteString(w, body)
-	return err
+	return page(w, lang, "pociag.info",
+		`<pre class="wide">`+top+wide+"\n\n"+credits+"\n</pre>\n"+
+			`<pre class="narrow">`+narrowTop+lines(narrow+"\n\n"+dimLines(narrowCredits(For(lang).Credits)))+"</pre>")
+}
+
+// lines makes every line of HTML text a block, indented by its leading
+// spaces, so that it wraps at that indent. Styled spans must not cross lines.
+func lines(text string) string {
+	var out strings.Builder
+	for _, l := range strings.Split(text, "\n") {
+		t := strings.TrimLeft(l, " ")
+		if indent := len(l) - len(t); indent > 0 {
+			fmt.Fprintf(&out, `<span class="ln" style="padding-left: %dch">%s</span>`, indent, t)
+		} else {
+			out.WriteString(`<span class="ln">` + t + "</span>")
+		}
+	}
+	return out.String()
+}
+
+// dimLines dims every line of text on its own, for lines.
+func dimLines(text string) string {
+	ls := strings.Split(text, "\n")
+	for i, l := range ls {
+		ls[i] = style(FormatHTML, styleDim, l)
+	}
+	return strings.Join(ls, "\n")
+}
+
+// narrowCredits puts each source on a line of its own: "Dane:",
+// "PKP PLK S.A.", "GTFS: …".
+func narrowCredits(credits string) string {
+	return strings.ReplaceAll(strings.Replace(credits, ": ", ":\n", 1), " · ", "\n")
 }
 
 type styleName string
@@ -211,8 +267,7 @@ func board(b Board, f Format, narrow bool) string {
 	}
 	credits := s.Credits
 	if narrow {
-		// One source per line: "Dane:", "PKP PLK S.A.", "GTFS: …".
-		credits = strings.ReplaceAll(strings.Replace(credits, ": ", ":\n", 1), " · ", "\n")
+		credits = narrowCredits(credits)
 	}
 	out.WriteString(style(f, styleDim, credits) + "\n")
 	return out.String()
@@ -399,9 +454,11 @@ pre { margin: 0; font: 15px/1.4 ui-monospace, "DejaVu Sans Mono", Menlo, Consola
 @media (max-width: 800px) {
   .wide { display: none; }
   .narrow { display: block; }
-  .narrow .train { display: block; width: fit-content; margin: 0 auto; }
+  /* The drawing is 33 characters, about 20em: shrink it rather than wrap it. */
+  .narrow .train { display: block; width: fit-content; margin: 0 auto; white-space: pre; font-size: min(1em, calc((100vw - 32px) / 20)); }
   .narrow .head { display: block; text-align: center; }
   .narrow .day { display: inline-block; width: 100%%; text-align: center; }
+  .narrow .ln { display: block; min-height: 1.4em; }
 }
 a { color: inherit; }
 .bold { font-weight: bold; }
