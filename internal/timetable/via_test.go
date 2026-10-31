@@ -374,3 +374,41 @@ func TestVia_SkippedViaStop(t *testing.T) {
 		})
 	}
 }
+
+// TestVia_ChangeAtLaterCall: R calls at Beta twice. The first time it only
+// picks up, so you can't change there; the second time you can get off and
+// change to Z. If R itself runs on to Gamma first, staying on wins, and the
+// two ways onto R at Alfa make only one journey.
+func TestVia_ChangeAtLaterCall(t *testing.T) {
+	r := "R,0,A,08:00:00,08:00:00,0,0\nR,1,B,08:30:00,08:31:00,0,1\nR,2,D,09:00:00,09:00:00,0,0\nR,3,B,09:30:00,09:30:00,0,0\n"
+	z := "Z,0,B,09:40:00,09:40:00,0,0\nZ,1,C,10:30:00,10:30:00,0,0\n"
+	tests := []struct {
+		name      string
+		stopTimes string
+		want      string
+	}{
+		{"change at the second call", r + z, "08:00 R Alfa-Beta 09:30 | 09:40 Z Beta-Gamma 10:30"},
+		{"staying on wins, once", r + "R,4,C,10:20:00,10:20:00,0,0\n" + z, "08:00 R Alfa-Gamma 10:20"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			feed := fstest.MapFS{
+				"agency.txt": viaFeed["agency.txt"],
+				"routes.txt": viaFeed["routes.txt"],
+				"stops.txt":  viaFeed["stops.txt"],
+				"trips.txt": {Data: []byte("trip_id,route_id,service_id,trip_headsign,plk_category_code,plk_train_number,plk_train_name\n" +
+					"R,KD,S,Beta,KD,R,\nZ,KD,S,Gamma,KD,Z,\n")},
+				"stop_times.txt":     {Data: []byte("trip_id,stop_sequence,stop_id,arrival_time,departure_time,pickup_type,drop_off_type\n" + tc.stopTimes)},
+				"calendar_dates.txt": viaFeed["calendar_dates.txt"],
+			}
+			got := newTimetable(t, feed).Via([]string{"A", "B", "C"}, at("2026-10-22", "00:00"), 10, 5*time.Minute, nil)
+			if len(got) != 1 || journeySummary(got[0]) != tc.want {
+				g := make([]string, len(got))
+				for i, j := range got {
+					g[i] = journeySummary(j)
+				}
+				t.Errorf("got %q, want [%q]", g, tc.want)
+			}
+		})
+	}
+}

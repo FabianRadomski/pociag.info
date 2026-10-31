@@ -104,6 +104,11 @@ func (t *Timetable) Connections(from, to string, after time.Time, n int) []Conne
 
 // candidates returns every ride from `from` to `to` scheduled to depart at
 // or after `since` within the search window, ordered by departure.
+//
+// With dropOff false (a via stop, ridden through or changed at), a ride ends
+// at the train's first call at `to`, even one where nobody may get off; if
+// it is one, the same train also gives a ride to its first later call at
+// `to` that does let you off, to change there.
 func (t *Timetable) candidates(from, to string, since time.Time, pickup, dropOff bool) []Connection {
 	first := gtfs.DateOf(since.In(warsaw)).AddDays(-t.daysBack)
 	days := t.daysBack + searchDays + 1
@@ -118,6 +123,12 @@ func (t *Timetable) candidates(from, to string, since time.Time, pickup, dropOff
 		if !ok {
 			continue
 		}
+		dests := []gtfs.StopTime{dest}
+		if dest.NoDropOff {
+			if off, ok := t.alightingAt(ref.trip, ref.idx, to, true); ok {
+				dests = append(dests, off)
+			}
+		}
 		for i := range days {
 			date := first.AddDays(i)
 			if !t.feed.Runs(ref.trip.ServiceID, date) {
@@ -126,11 +137,13 @@ func (t *Timetable) candidates(from, to string, since time.Time, pickup, dropOff
 			if date.At(origin.Departure, warsaw).Before(since) {
 				continue
 			}
-			out = append(out, t.connection(ref.trip, origin, dest, date))
+			for _, dest := range dests {
+				out = append(out, t.connection(ref.trip, origin, dest, date))
+			}
 		}
 	}
 	slices.SortFunc(out, func(a, b Connection) int {
-		return cmp.Or(a.Departure.Compare(b.Departure), cmp.Compare(a.TripID, b.TripID))
+		return cmp.Or(a.Departure.Compare(b.Departure), cmp.Compare(a.TripID, b.TripID), cmp.Compare(a.dest.Sequence, b.dest.Sequence))
 	})
 	return out
 }
