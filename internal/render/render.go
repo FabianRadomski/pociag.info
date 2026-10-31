@@ -234,15 +234,6 @@ func journeyRows(journeys []timetable.Journey, now time.Time, s Strings, narrow 
 		if narrow && len(rows) > 0 || i > 0 && (len(j.Legs) > 1 || len(journeys[i-1].Legs) > 1) {
 			rows = append(rows, row{})
 		}
-		dep := j.Legs[0].Departure.In(warsaw)
-		if d := dateOf(dep); d != day {
-			day = d
-			sep := plain("── " + s.shortDate(dep) + " ──")
-			if narrow {
-				sep[0].style = styleDay
-			}
-			rows = append(rows, row{line: sep})
-		}
 		for k, c := range j.Legs {
 			if k > 0 {
 				prev := j.Legs[k-1]
@@ -252,6 +243,16 @@ func journeyRows(journeys []timetable.Journey, now time.Time, s Strings, narrow 
 					change.lineCol = 1
 				}
 				rows = append(rows, change)
+			}
+			// Every leg is dated, so a change after midnight gets its separator.
+			dep := c.Departure.In(warsaw)
+			if d := dateOf(dep); d != day {
+				day = d
+				sep := plain("── " + s.shortDate(dep) + " ──")
+				if narrow {
+					sep[0].style = styleDay
+				}
+				rows = append(rows, row{line: sep})
 			}
 			rows = append(rows, legRows(c, s, narrow)...)
 		}

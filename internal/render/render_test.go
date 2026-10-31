@@ -394,3 +394,17 @@ PKP PLK S.A.
 GTFS: Mikołaj Kuranowski
 `)
 }
+
+func TestText_ViaChangeAfterMidnight(t *testing.T) {
+	b := viaBoard()
+	leg := &b.Journeys[0].Legs[1]
+	leg.Departure, leg.Arrival = at("2026-10-23 00:15:00"), at("2026-10-23 02:40:00")
+	got := text(t, b, false)
+
+	if !strings.Contains(got, "change in Poznań Główny, 73 min\n── Friday, 23.10 ──\n00:15 ") {
+		t.Errorf("no day separator before the leg leaving after midnight:\n%s", got)
+	}
+	if n := strings.Count(got, "── Friday, 23.10 ──"); n != 1 {
+		t.Errorf("day separator shown %d times, want 1:\n%s", n, got)
+	}
+}
