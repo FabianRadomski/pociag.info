@@ -31,13 +31,14 @@ server's address. Neither belongs in this repo.
 2. Install the script and the sudo rule on the server, as root:
 
    ```sh
-   install -o root -g root -m 0755 pociag-deploy /usr/local/sbin/pociag-deploy
+   install -D -o root -g root -m 0755 pociag-deploy /usr/local/sbin/pociag-deploy
    echo 'deploy ALL=(root) NOPASSWD: /usr/local/sbin/pociag-deploy ""' > /etc/sudoers.d/pociag-deploy
    chmod 0440 /etc/sudoers.d/pociag-deploy
    visudo -c
    ```
 
-   The trailing `""` means the rule only matches when no arguments are passed.
+   `-D` creates `/usr/local/sbin`, which a stock Alpine doesn't have. The
+   trailing `""` means the rule only matches when no arguments are passed.
 
 3. Append the public key to the deploy account's `~/.ssh/authorized_keys`,
    prefixed with the restrictions (one line):

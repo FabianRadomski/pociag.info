@@ -2,7 +2,7 @@
 # Installs a pociag binary read from stdin, restarts the service and rolls
 # back to the previous binary if the new one doesn't answer.
 #
-# Install as root:  install -o root -g root -m 0755 pociag-deploy /usr/local/sbin/
+# Install as root:  install -D -o root -g root -m 0755 pociag-deploy /usr/local/sbin/pociag-deploy
 # It must stay root-owned and not writable by the deploy user: it runs as root
 # through a NOPASSWD sudo rule. See deploy/README.md.
 set -eu
@@ -20,7 +20,7 @@ fail() { log "$*"; exit 1; }
 healthy() {
 	i=0
 	while [ $i -lt 20 ]; do
-		if wget -q -O /dev/null -T 3 "$HEALTH_URL"; then
+		if wget -q -O /dev/null -T 3 "$HEALTH_URL" 2>/dev/null; then
 			return 0
 		fi
 		i=$((i + 1))
@@ -56,7 +56,9 @@ fi
 
 log "$SERVICE didn't answer on $HEALTH_URL"
 [ -e "$PREV" ] || fail "no previous binary to roll back to"
-cp -p "$PREV" "$BIN"
+# Rename rather than copy over the binary: it may still be running.
+cp -p "$PREV" "$NEW"
+mv -f "$NEW" "$BIN"
 rc-service "$SERVICE" restart
 if healthy; then
 	fail "rolled back to the previous binary"
