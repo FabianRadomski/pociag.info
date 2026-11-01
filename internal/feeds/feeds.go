@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"os"
 	"runtime/debug"
 	"sync/atomic"
@@ -35,6 +36,8 @@ type Store struct {
 
 	static atomic.Pointer[Static]
 	live   atomic.Pointer[realtime.Snapshot]
+	// misaligned is set while the realtime feed doesn't fit the timetable.
+	misaligned atomic.Bool
 
 	beforeParse func() // test hook
 }
@@ -64,10 +67,12 @@ func (s *Store) LoadStaticFile(path string) error {
 				return errors.Join(err, fmt.Errorf("fall back to cached static: %w", cacheErr))
 			}
 			s.static.Store(prev)
+			s.prepare()
 		}
 		return err
 	}
 	s.static.Store(st)
+	s.prepare()
 	if s.StaticCache != "" && path != s.StaticCache {
 		if err := os.Rename(path, s.StaticCache); err != nil {
 			return fmt.Errorf("keep static cache: %w", err)
@@ -89,6 +94,7 @@ func (s *Store) LoadCachedStatic() (time.Time, error) {
 		return time.Time{}, err
 	}
 	s.static.Store(st)
+	s.prepare()
 	return info.ModTime(), nil
 }
 
@@ -114,14 +120,37 @@ func loadZip(path string) (*Static, error) {
 	return &Static{Timetable: tt, Stations: stations.NewIndex(tt.StationNames())}, nil
 }
 
-// LoadRealtime parses a GTFS-Realtime feed and makes it current.
+// LoadRealtime parses a GTFS-Realtime feed and makes it current, then
+// prepares it (see prepare).
 func (s *Store) LoadRealtime(b []byte) error {
 	snap, err := realtime.Parse(b)
 	if err != nil {
 		return err
 	}
 	s.live.Store(snap)
+	s.prepare()
 	return nil
+}
+
+// prepare checks that the realtime feed fits the timetable, logging when
+// that changes, and indexes the timetable for journeys at its live times,
+// so that requests don't wait for it.
+func (s *Store) prepare() {
+	st, snap := s.static.Load(), s.live.Load()
+	if st == nil {
+		return
+	}
+	if snap != nil {
+		usable, fit, known := st.Timetable.Alignment(snap)
+		if s.misaligned.Swap(!usable) != !usable {
+			if usable {
+				slog.Info("realtime feed fits the timetable again", "fit", fit, "trips", known)
+			} else {
+				slog.Warn("realtime feed doesn't fit the timetable; ignoring it", "fit", fit, "trips", known)
+			}
+		}
+	}
+	st.Timetable.Prepare(snap, time.Now())
 }
 
 // Static returns the current timetable, or nil before the first load.

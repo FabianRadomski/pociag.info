@@ -10,7 +10,6 @@ import (
 	rt "github.com/MobilityData/gtfs-realtime-bindings/golang/gtfs"
 	"google.golang.org/protobuf/proto"
 
-	"pociag.info/internal/gtfs"
 	"pociag.info/internal/realtime"
 )
 
@@ -60,6 +59,12 @@ func journeySummary(j Journey) string {
 			c.Leaves().In(warsaw).Format("15:04"), c.Number, c.From, c.To, c.Arrives().In(warsaw).Format("15:04"))
 	}
 	return strings.Join(legs, " | ")
+}
+
+// via asks tt for journeys through stops, the way the via search was asked
+// before journeys with changes replaced it.
+func via(tt *Timetable, stops []string, now time.Time, n int, change time.Duration, snap *realtime.Snapshot) []Journey {
+	return tt.Journeys(Query{Stops: stops, Now: now, N: n, Change: change}, snap)
 }
 
 func TestVia(t *testing.T) {
@@ -127,7 +132,7 @@ func TestVia(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := tt.Via(tc.stops, at("2026-10-22", tc.now), 10, tc.change, tc.snap)
+			got := via(tt, tc.stops, at("2026-10-22", tc.now), 10, tc.change, tc.snap)
 			g := make([]string, len(got))
 			for i, j := range got {
 				g[i] = journeySummary(j)
@@ -142,7 +147,7 @@ func TestVia(t *testing.T) {
 
 func TestVia_LimitsCount(t *testing.T) {
 	tt := newTimetable(t, viaFeed)
-	got := tt.Via([]string{"A", "B", "C"}, at("2026-10-22", "00:00"), 2, 5*time.Minute, nil)
+	got := via(tt, []string{"A", "B", "C"}, at("2026-10-22", "00:00"), 2, 5*time.Minute, nil)
 	if len(got) != 2 || got[0].Legs[0].Number != "AB0800" {
 		t.Errorf("got %d journeys starting %v, want 2 starting AB0800", len(got), got)
 	}
@@ -163,7 +168,7 @@ func TestVia_FallsBackWhenLaterLegFails(t *testing.T) {
 			"SLOW,0,B,09:15:00,09:15:00\nSLOW,1,C,10:00:00,10:01:00\nSLOW,2,D,11:00:00,11:00:00\n")},
 		"calendar_dates.txt": viaFeed["calendar_dates.txt"],
 	}
-	got := newTimetable(t, feed).Via([]string{"A", "B", "C", "D"}, at("2026-10-22", "00:00"), 10, 5*time.Minute, nil)
+	got := via(newTimetable(t, feed), []string{"A", "B", "C", "D"}, at("2026-10-22", "00:00"), 10, 5*time.Minute, nil)
 	want := "08:00 AB Alfa-Beta 09:00 | 09:15 SLOW Beta-Delta 11:00"
 	if len(got) != 1 || journeySummary(got[0]) != want {
 		g := make([]string, len(got))
@@ -189,7 +194,7 @@ func TestVia_LoopTrainOnlyContinuesForward(t *testing.T) {
 			"LOOP,3,B,11:30:00,11:30:00\nLOOP,4,C,12:00:00,12:00:00\n")},
 		"calendar_dates.txt": viaFeed["calendar_dates.txt"],
 	}
-	got := newTimetable(t, feed).Via([]string{"A", "B", "C"}, at("2026-10-22", "00:00"), 10, 5*time.Minute, nil)
+	got := via(newTimetable(t, feed), []string{"A", "B", "C"}, at("2026-10-22", "00:00"), 10, 5*time.Minute, nil)
 	want := "11:00 LOOP Alfa-Gamma 12:00"
 	if len(got) != 1 || journeySummary(got[0]) != want {
 		g := make([]string, len(got))
@@ -217,7 +222,7 @@ func TestVia_ThroughRestrictedStop(t *testing.T) {
 			"NOEND,0,A,15:00:00,15:00:00,0,0\nNOEND,1,B,16:00:00,16:00:00,0,0\nNOEND,2,C,17:00:00,17:00:00,0,1\n")},
 		"calendar_dates.txt": viaFeed["calendar_dates.txt"],
 	}
-	got := newTimetable(t, feed).Via([]string{"A", "B", "C"}, at("2026-10-22", "00:00"), 10, 5*time.Minute, nil)
+	got := via(newTimetable(t, feed), []string{"A", "B", "C"}, at("2026-10-22", "00:00"), 10, 5*time.Minute, nil)
 	g := make([]string, len(got))
 	for i, j := range got {
 		g[i] = journeySummary(j)
@@ -248,7 +253,7 @@ func TestVia_LaterTrainRunsOnThrough(t *testing.T) {
 			"CD,0,C,10:10:00,10:10:00\nCD,1,D,11:00:00,11:00:00\n")},
 		"calendar_dates.txt": viaFeed["calendar_dates.txt"],
 	}
-	got := newTimetable(t, feed).Via([]string{"A", "B", "C", "D"}, at("2026-10-22", "00:00"), 10, 5*time.Minute, nil)
+	got := via(newTimetable(t, feed), []string{"A", "B", "C", "D"}, at("2026-10-22", "00:00"), 10, 5*time.Minute, nil)
 	want := "08:00 AB Alfa-Beta 09:00 | 09:15 Q Beta-Delta 10:30"
 	if len(got) != 1 || journeySummary(got[0]) != want {
 		g := make([]string, len(got))
@@ -280,7 +285,7 @@ func TestVia_OrderedByScheduledDeparture(t *testing.T) {
 	}
 	snap := snapshot(t, "LATE", rt.TripDescriptor_SCHEDULED,
 		upd(0, nil, next("00:15")), upd(1, next("00:30"), next("00:31")), upd(2, next("00:50"), nil))
-	got := newTimetable(t, feed).Via([]string{"A", "B", "C"}, at("2026-10-22", "23:00"), 10, 5*time.Minute, snap)
+	got := via(newTimetable(t, feed), []string{"A", "B", "C"}, at("2026-10-22", "23:00"), 10, 5*time.Minute, snap)
 	g := make([]string, len(got))
 	for i, j := range got {
 		g[i] = journeySummary(j)
@@ -291,29 +296,6 @@ func TestVia_OrderedByScheduledDeparture(t *testing.T) {
 	}
 	if strings.Join(g, "\n") != strings.Join(want, "\n") {
 		t.Errorf("journeys mismatch\n got:\n  %s\nwant:\n  %s", strings.Join(g, "\n  "), strings.Join(want, "\n  "))
-	}
-}
-
-// TestWayCompare pins the order in which ways on from a leg are preferred.
-func TestWayCompare(t *testing.T) {
-	t9, t10, t11 := at("2026-10-22", "09:00"), at("2026-10-22", "10:00"), at("2026-10-22", "11:00")
-	tests := []struct {
-		name string
-		a, b way
-	}{
-		{"earlier final arrival wins over earlier next stop",
-			way{idx: 0, final: t10, next: t10}, way{idx: 1, final: t11, next: t9}},
-		{"earlier next stop wins over staying on",
-			way{idx: 0, final: t11, next: t9}, way{idx: 1, final: t11, next: t10, same: true}},
-		{"staying on wins over a later departure",
-			way{idx: 0, final: t11, next: t10, same: true}, way{idx: 1, final: t11, next: t10}},
-		{"later departure wins otherwise",
-			way{idx: 1, final: t11, next: t10}, way{idx: 0, final: t11, next: t10}},
-	}
-	for _, tc := range tests {
-		if tc.a.compare(tc.b) >= 0 || tc.b.compare(tc.a) <= 0 {
-			t.Errorf("%s: a.compare(b) = %d, b.compare(a) = %d", tc.name, tc.a.compare(tc.b), tc.b.compare(tc.a))
-		}
 	}
 }
 
@@ -361,7 +343,7 @@ func TestVia_SkippedViaStop(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := tc.tt.Via([]string{"A", "B", "C"}, at("2026-10-22", "00:00"), 10, 5*time.Minute, tc.snap)
+			got := via(tc.tt, []string{"A", "B", "C"}, at("2026-10-22", "00:00"), 10, 5*time.Minute, tc.snap)
 			g := make([]string, len(got))
 			for i, j := range got {
 				g[i] = journeySummary(j)
@@ -402,7 +384,7 @@ func TestVia_ChangeAtLaterCall(t *testing.T) {
 				"stop_times.txt":     {Data: []byte("trip_id,stop_sequence,stop_id,arrival_time,departure_time,pickup_type,drop_off_type\n" + tc.stopTimes)},
 				"calendar_dates.txt": viaFeed["calendar_dates.txt"],
 			}
-			got := newTimetable(t, feed).Via([]string{"A", "B", "C"}, at("2026-10-22", "00:00"), 10, 5*time.Minute, nil)
+			got := via(newTimetable(t, feed), []string{"A", "B", "C"}, at("2026-10-22", "00:00"), 10, 5*time.Minute, nil)
 			if len(got) != 1 || journeySummary(got[0]) != tc.want {
 				g := make([]string, len(got))
 				for i, j := range got {
@@ -444,7 +426,7 @@ func TestVia_OnwardTrainAfterWindow(t *testing.T) {
 					"BC,0,B,07:00:00,07:00:00\nBC,1,C,08:00:00,08:00:00\n")},
 				"calendar_dates.txt": {Data: []byte("service_id,date,exception_type\nS1," + tc.abDate + ",1\nS2," + tc.bcDate + ",1\n")},
 			}
-			got := newTimetable(t, feed).Via([]string{"A", "B", "C"}, at("2026-10-22", "12:00"), 10, 5*time.Minute, nil)
+			got := via(newTimetable(t, feed), []string{"A", "B", "C"}, at("2026-10-22", "12:00"), 10, 5*time.Minute, nil)
 			g := make([]string, len(got))
 			for i, j := range got {
 				legs := make([]string, len(j.Legs))
@@ -480,7 +462,7 @@ func TestVia_LateArrivalLooksPastWindow(t *testing.T) {
 			"BC2,0,B,00:30:00,00:30:00\nBC2,1,C,01:00:00,01:00:00\n")},
 		"calendar_dates.txt": {Data: []byte("service_id,date,exception_type\nS1,20261029,1\nS2,20261030,1\n")},
 	}
-	got := newTimetable(t, feed).Via([]string{"A", "B", "C"}, at("2026-10-27", "12:00"), 1, 5*time.Minute, nil)
+	got := via(newTimetable(t, feed), []string{"A", "B", "C"}, at("2026-10-27", "12:00"), 1, 5*time.Minute, nil)
 	want := "20:00 AB Alfa-Beta 21:00 | 00:30 BC2 Beta-Gamma 01:00"
 	if len(got) != 1 || journeySummary(got[0]) != want {
 		g := make([]string, len(got))
@@ -489,45 +471,4 @@ func TestVia_LateArrivalLooksPastWindow(t *testing.T) {
 		}
 		t.Errorf("got %q, want [%q]", g, want)
 	}
-}
-
-// TestVia_SameAsWiderSearch: Via only looks past the search window when
-// the journeys within it might not be final; the result must match always
-// looking past it.
-func TestVia_SameAsWiderSearch(t *testing.T) {
-	feed, err := gtfs.Load(benchFeed(40, 15))
-	if err != nil {
-		t.Fatal(err)
-	}
-	tt := New(feed)
-	short := 0
-	for _, stops := range [][]string{{"A", "B", "C"}, {"A", "B", "C", "D"}, {"A", "B", "C", "D", "E"}} {
-		for day := 22; day <= 27; day++ {
-			for hour := 0; hour < 24; hour += 3 {
-				now := time.Date(2026, 10, day, hour, 0, 0, 0, warsaw)
-				wide, _ := tt.via(stops, now, 5*time.Minute, nil, true)
-				for _, n := range []int{1, 3, 10} {
-					got := tt.Via(stops, now, n, 5*time.Minute, nil)
-					want := wide[:min(n, len(wide))]
-					g, w := make([]string, len(got)), make([]string, len(want))
-					for i, j := range got {
-						g[i] = journeySummary(j)
-					}
-					for i, j := range want {
-						w[i] = journeySummary(j)
-					}
-					if strings.Join(g, "\n") != strings.Join(w, "\n") {
-						t.Fatalf("%v at %v, n=%d:\n got:\n  %s\nwant:\n  %s", stops, now, n, strings.Join(g, "\n  "), strings.Join(w, "\n  "))
-					}
-					if out, firsts := tt.via(stops, now, 5*time.Minute, nil, false); settled(out, firsts, n, tt.windowEnd(now.Add(-maxDelay))) {
-						short++
-					}
-				}
-			}
-		}
-	}
-	if short == 0 {
-		t.Error("no search was settled within the window; the test checks nothing")
-	}
-	t.Logf("%d searches settled within the window", short)
 }

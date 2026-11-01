@@ -1,10 +1,13 @@
-// Package timetable answers "which direct trains go from A to B next?" from a
-// static GTFS feed.
+// Package timetable answers "which trains go from A to B next?" from a
+// static GTFS feed and live updates: direct trains, and journeys with
+// changes.
 package timetable
 
 import (
 	"cmp"
 	"slices"
+	"sync"
+	"sync/atomic"
 	"time"
 	_ "time/tzdata" // the feed's local times are Polish; don't depend on host tzdata
 
@@ -53,6 +56,20 @@ type Timetable struct {
 	names     map[string]string
 	// daysBack: trips with times past 24:00 belong to earlier service days.
 	daysBack int
+
+	// For journeys: trips by ID, stations numbered from 0, the station
+	// number of each of a trip's stops, and the trips a train goes on as.
+	trips       []*gtfs.Trip
+	stationNum  map[string]uint32
+	stationIDs  []string // by number
+	stopStation map[*gtfs.Trip][]uint32
+	continues   map[*gtfs.Trip][]*gtfs.Trip
+
+	mu        sync.Mutex // guards idx and lastConns, and is held while an index is built
+	idx       *index
+	lastConns int // capacity for the next index's connections
+	// fit caches the alignment check of the latest snapshot.
+	fit atomic.Pointer[alignment]
 }
 
 type stopRef struct {
@@ -62,13 +79,21 @@ type stopRef struct {
 
 func New(feed *gtfs.Feed) *Timetable {
 	t := &Timetable{
-		feed:      feed,
-		byStation: map[string][]stopRef{},
-		stationOf: map[gtfs.Str]string{},
-		names:     make(map[string]string, len(feed.Stations)),
+		feed:        feed,
+		byStation:   map[string][]stopRef{},
+		stationOf:   map[gtfs.Str]string{},
+		names:       make(map[string]string, len(feed.Stations)),
+		stationNum:  map[string]uint32{},
+		stopStation: make(map[*gtfs.Trip][]uint32, len(feed.Trips)),
+		continues:   map[*gtfs.Trip][]*gtfs.Trip{},
 	}
-	var maxOffset gtfs.Time
 	for _, trip := range feed.Trips {
+		t.trips = append(t.trips, trip)
+	}
+	slices.SortFunc(t.trips, func(a, b *gtfs.Trip) int { return cmp.Compare(a.ID, b.ID) })
+	var maxOffset gtfs.Time
+	for _, trip := range t.trips {
+		nums := make([]uint32, len(trip.StopTimes))
 		for i, st := range trip.StopTimes {
 			s, ok := t.stationOf[st.StopID]
 			if !ok {
@@ -80,6 +105,18 @@ func New(feed *gtfs.Feed) *Timetable {
 			}
 			t.byStation[s] = append(t.byStation[s], stopRef{trip, i})
 			maxOffset = max(maxOffset, st.Arrival, st.Departure)
+
+			n, ok := t.stationNum[s]
+			if !ok {
+				n = uint32(len(t.stationIDs))
+				t.stationNum[s] = n
+				t.stationIDs = append(t.stationIDs, s)
+			}
+			nums[i] = n
+		}
+		t.stopStation[trip] = nums
+		for _, id := range feed.Continues[trip.ID] {
+			t.continues[trip] = append(t.continues[trip], feed.Trips[id])
 		}
 	}
 	t.daysBack = int(maxOffset.Duration() / (24 * time.Hour))

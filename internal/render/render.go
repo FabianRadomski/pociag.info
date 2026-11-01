@@ -32,18 +32,18 @@ const (
 	FormatHTML
 )
 
-// Board is everything shown on one page.
+// Board is everything shown on one page: journeys, or with Direct the
+// direct trains in Connections.
 type Board struct {
-	Lang        Lang
-	From, To    string
-	Now         time.Time
-	LiveAt      time.Time // zero when there is no realtime data
-	Connections []timetable.Connection
-
-	// Via stations, in order; when set, Journeys are shown instead of
-	// Connections.
-	Via      []string
+	Lang     Lang
+	From, To string
+	Via      []string // via stations, in order
+	Now      time.Time
+	LiveAt   time.Time // zero when there is no realtime data
 	Journeys []timetable.Journey
+
+	Direct      bool
+	Connections []timetable.Connection
 }
 
 // Text writes the board for a terminal, under the train, with ANSI colours if
@@ -244,17 +244,19 @@ func board(b Board, f Format, narrow bool) string {
 	out.WriteString(head + "\n")
 
 	journeys := b.Journeys
-	if len(b.Via) == 0 {
+	if b.Direct {
 		journeys = make([]timetable.Journey, len(b.Connections))
 		for i, c := range b.Connections {
 			journeys[i] = timetable.Journey{Legs: []timetable.Connection{c}}
 		}
 	}
 	switch {
+	case len(journeys) == 0 && b.Direct:
+		out.WriteString(style(f, "", s.NoConnections) + "\n")
 	case len(journeys) == 0 && len(b.Via) > 0:
 		out.WriteString(style(f, "", s.NoJourneys) + "\n")
 	case len(journeys) == 0:
-		out.WriteString(style(f, "", s.NoConnections) + "\n")
+		out.WriteString(style(f, "", s.NoRoute) + "\n")
 	default:
 		out.WriteString(table(journeyRows(journeys, now, s, narrow), f))
 	}

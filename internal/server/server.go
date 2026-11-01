@@ -15,13 +15,14 @@ import (
 	"pociag.info/internal/realtime"
 	"pociag.info/internal/render"
 	"pociag.info/internal/stations"
+	"pociag.info/internal/timetable"
 )
 
 const (
 	defaultCount = 8
 	maxCount     = 20
 	maxVia       = 3
-	// Minimum change time at a via station, in minutes.
+	// Minimum change time, in minutes.
 	defaultChange = 5
 	maxChange     = 60
 	// Older realtime data is worse than none: it would show stale delays.
@@ -102,13 +103,16 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if snap != nil && now.Sub(snap.Timestamp) > maxSnapshotAge {
 		snap = nil
 	}
+	snap = static.Timetable.Match(snap)
 	board := render.Board{
 		Lang: lang,
 		From: from.Name,
 		To:   to.Name,
 		Now:  now,
 	}
-	if len(resolved) == 2 {
+	direct := r.URL.Query().Has("direct")
+	if len(resolved) == 2 && direct {
+		board.Direct = true
 		board.Connections = static.Timetable.Live(from.ID, to.ID, now, count(r), snap)
 	} else {
 		ids := make([]string, len(resolved))
@@ -118,7 +122,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		for _, st := range resolved[1 : len(resolved)-1] {
 			board.Via = append(board.Via, st.Name)
 		}
-		board.Journeys = static.Timetable.Via(ids, now, count(r), change(r), snap)
+		board.Journeys = static.Timetable.Board(timetable.Query{
+			Stops: ids, Now: now, N: count(r), Change: change(r), Direct: direct,
+		}, snap)
 	}
 	if snap != nil {
 		board.LiveAt = snap.Timestamp
@@ -196,8 +202,7 @@ func language(r *http.Request) render.Lang {
 	return render.PL
 }
 
-// change is the minimum change time at via stations from ?change=, in
-// minutes.
+// change is the minimum change time from ?change=, in minutes.
 func change(r *http.Request) time.Duration {
 	m, err := strconv.Atoi(r.URL.Query().Get("change"))
 	if err != nil || m < 0 {

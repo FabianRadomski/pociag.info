@@ -199,6 +199,29 @@ func TestLoad_Minimal(t *testing.T) {
 	}
 }
 
+// TestLoad_Transfers: type 1 rows between two trips say the train goes on
+// as the other trip; stop-to-stop rows, other types and unknown trips are
+// ignored. The minimal feed has no transfers.txt at all.
+func TestLoad_Transfers(t *testing.T) {
+	if feed, err := Load(minimal(nil)); err != nil || len(feed.Continues) != 0 {
+		t.Fatalf("without transfers.txt: %v, Continues %v", err, feed.Continues)
+	}
+	feed, err := Load(minimal(map[string]string{
+		"trips.txt": "trip_headsign,trip_id,service_id,route_id\nBeta,T,SV,R\nBeta,U,SV,R\nBeta,V,SV,R\n",
+		"transfers.txt": "from_stop_id,to_stop_id,from_trip_id,to_trip_id,transfer_type\n" +
+			"S2,S2,T,U,1\n" + // T goes on as U
+			"S2,S2,T,V,2\n" + // a minimum change time, not the same train
+			"S1,S2,,,1\n" + // between stops, not trips
+			"S2,S2,T,X,1\n", // unknown trip
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := feed.Continues; len(got) != 1 || len(got["T"]) != 1 || got["T"][0] != "U" {
+		t.Errorf("Continues = %v, want map[T:[U]]", got)
+	}
+}
+
 func TestLoad_LargeStopSequences(t *testing.T) {
 	// GTFS-Realtime stop_sequence is a uint32, so the whole range must load.
 	feed, err := Load(minimal(map[string]string{

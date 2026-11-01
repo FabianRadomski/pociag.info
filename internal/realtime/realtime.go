@@ -8,6 +8,7 @@ package realtime
 import (
 	"cmp"
 	"fmt"
+	"iter"
 	"slices"
 	"time"
 
@@ -213,6 +214,32 @@ func (s *Snapshot) Trip(tripID string, date gtfs.Date) (*Trip, bool) {
 	}
 	t, ok := s.trips[key{tripID, date}]
 	return t, ok
+}
+
+// All yields every trip with updates, by trip_id; a trip running on two
+// service dates comes twice. A nil Snapshot yields nothing.
+func (s *Snapshot) All() iter.Seq2[string, *Trip] {
+	return func(yield func(string, *Trip) bool) {
+		if s == nil {
+			return
+		}
+		for k, t := range s.trips {
+			if !yield(k.tripID, t) {
+				return
+			}
+		}
+	}
+}
+
+// Sequences yields the stop_sequence of every update, in order.
+func (t *Trip) Sequences() iter.Seq[uint32] {
+	return func(yield func(uint32) bool) {
+		for _, p := range t.stops {
+			if !yield(p.seq) {
+				return
+			}
+		}
+	}
 }
 
 // Stops returns the trip's updates sorted by Sequence.

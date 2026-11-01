@@ -46,6 +46,10 @@ type Feed struct {
 	Stations map[string]Station // location_type=1, plus parentless stops
 	Stops    map[string]Stop    // every stop, including stations
 	Trips    map[string]*Trip
+	// Continues maps a trip ID to the trips the same train goes on as:
+	// transfers.txt rows of type 1 between two trips. mkuran.pl splits a
+	// train into such trips where part of its run is a replacement bus.
+	Continues map[string][]string
 
 	services map[string]map[Date]struct{}
 	strs     []string // indexed by Str
@@ -129,15 +133,16 @@ func (f *Feed) Runs(serviceID string, d Date) bool {
 // Load reads a feed from a directory or an opened zip (both are fs.FS).
 func Load(fsys fs.FS) (*Feed, error) {
 	f := &Feed{
-		Agencies: map[string]Agency{},
-		Routes:   map[string]Route{},
-		Stations: map[string]Station{},
-		Stops:    map[string]Stop{},
-		Trips:    map[string]*Trip{},
-		services: map[string]map[Date]struct{}{},
-		strs:     []string{""},
+		Agencies:  map[string]Agency{},
+		Routes:    map[string]Route{},
+		Stations:  map[string]Station{},
+		Stops:     map[string]Stop{},
+		Trips:     map[string]*Trip{},
+		Continues: map[string][]string{},
+		services:  map[string]map[Date]struct{}{},
+		strs:      []string{""},
 	}
-	steps := []func(fs.FS) error{f.loadAgencies, f.loadRoutes, f.loadStops, f.loadTrips, f.loadStopTimes, f.loadCalendarDates}
+	steps := []func(fs.FS) error{f.loadAgencies, f.loadRoutes, f.loadStops, f.loadTrips, f.loadStopTimes, f.loadCalendarDates, f.loadTransfers}
 	for _, step := range steps {
 		if err := step(fsys); err != nil {
 			return nil, err
@@ -277,6 +282,23 @@ func (f *Feed) loadCalendarDates(fsys fs.FS) error {
 		}
 		return nil
 	})
+}
+
+// loadTransfers reads the trip-to-trip rows of transfers.txt, which is
+// optional.
+func (f *Feed) loadTransfers(fsys fs.FS) error {
+	err := readTable(fsys, "transfers.txt", []string{"transfer_type"}, func(r row) error {
+		from, to := r.get("from_trip_id"), r.get("to_trip_id")
+		if r.get("transfer_type") != "1" || from == to || f.Trips[from] == nil || f.Trips[to] == nil {
+			return nil
+		}
+		f.Continues[from] = append(f.Continues[from], to)
+		return nil
+	})
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	return err
 }
 
 // parseTime parses "H:MM:SS"; hours may exceed 23. Empty means NoTime.
